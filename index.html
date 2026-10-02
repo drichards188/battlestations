@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MaxGFX: Valley of Wisps</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cpath d=%22M16 2l6 14-6 14-6-14z%22 fill=%22%238fe9ff%22/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body class="title cinematic">
+    <canvas id="c"></canvas>
+
+    <div id="letterbox"><div class="bar top"></div><div class="bar bottom"></div></div>
+    <div id="blackout" class="on"></div>
+
+    <div id="title-screen">
+      <div class="brand">
+        <h1>MAX<span>GFX</span></h1>
+        <p class="sub">Valley of Wisps</p>
+      </div>
+      <div class="loader">
+        <div id="load-bar"><div id="load-bar-fill"></div></div>
+        <p id="status">Generating world…</p>
+      </div>
+      <button id="play" disabled>Begin</button>
+      <ul class="keys">
+        <li><kbd>WASD</kbd> move</li>
+        <li><kbd>Shift</kbd> sprint</li>
+        <li><kbd>Space</kbd> jump / swim up</li>
+        <li><kbd>Q</kbd> dive</li>
+        <li><kbd>Click</kbd> / <kbd>E</kbd> throw light</li>
+        <li><kbd>F</kbd> fly</li>
+        <li><kbd>P</kbd> photo mode</li>
+        <li><kbd>C</kbd> cinematic</li>
+        <li><kbd>M</kbd> mute</li>
+        <li><kbd>H</kbd> hide UI</li>
+        <li><kbd>F3</kbd> stats</li>
+      </ul>
+    </div>
+
+    <div id="game-ui">
+      <div id="compass">
+        <div id="compass-strip"></div>
+        <div class="compass-center"></div>
+      </div>
+      <div id="objective">
+        <div id="obj-title">The Valley of Wisps</div>
+        <div id="obj-text"></div>
+      </div>
+      <div id="toast"><div id="toast-main"></div><div id="toast-sub"></div></div>
+      <div id="hint"></div>
+      <div id="crosshair"></div>
+      <div id="vitals">
+        <div id="light-bar"><div id="light-fill"></div></div>
+        <div id="orb-pips"></div>
+      </div>
+    </div>
+    <div id="dread"></div>
+
+    <div id="photo-ui">
+      <span>PHOTO MODE</span>
+      <span><kbd>K</kbd> capture</span>
+      <span><kbd>WASD</kbd> / <kbd>Space</kbd> / <kbd>Q</kbd> move</span>
+      <span><kbd>Esc</kbd> settings</span>
+      <span><kbd>P</kbd> exit</span>
+    </div>
+    <div id="flash"></div>
+
+    <div id="hud"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
