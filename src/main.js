@@ -3,33 +3,30 @@ import GUI from 'lil-gui';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 
 import { globalUniforms, patchSceneFog } from './shaderlib.js';
-import { Terrain, PLATEAU_HEIGHT, WATER_LEVEL } from './terrain.js';
-import { TerrainShadow } from './terrainShadow.js';
 import { Atmosphere } from './atmosphere.js';
-import { createWater } from './water.js';
-import { Grass } from './grass.js';
-import { createVegetation } from './vegetation.js';
-import { createMonument } from './monument.js';
-import { Particles } from './particles.js';
-import { Fauna } from './fauna.js';
+import { Ocean } from './ocean.js';
+import { Islands } from './islands.js';
+import { Clouds } from './clouds.js';
 import { Weather, WEATHER } from './weather.js';
-import { SkyFX } from './skyfx.js';
-import { Quest } from './quest.js';
 import { AudioEngine } from './audio.js';
 import { HUD } from './hud.js';
 import { PostFX, GRADES } from './post.js';
-import { Player } from './player.js';
-import { Underwater } from './underwater.js';
-import { Physics, loadRapier } from './physics.js';
-import { Creatures, SANCTUARY } from './creatures.js';
-import { LightOrbs } from './orbs.js';
-import { ecs, queries, motorSystem, syncSystem, collectLights } from './ecs.js';
+import { FX } from './fx.js';
+import { Ballistics, OWNER } from './ballistics.js';
+import { Air } from './air.js';
+import { Ordnance } from './ordnance.js';
+import { Fleet } from './fleet.js';
+import { Gunner } from './gunner.js';
+import { ShipMap } from './shipmap.js';
+import { Director, DIFFICULTY } from './director.js';
+import { Cinematic } from './cinematic.js';
+import { buildAircraft, createAircraftMaterial } from './models/aircraft.js';
 
 const QUALITY = {
-  Low: { pixelRatio: 0.75, shadowMap: 1024, shadowExtent: 90, grass: 80000, ao: false, raySamples: 16, dofSamples: 16, kelp: 0.3, fish: 70 },
-  Medium: { pixelRatio: 1, shadowMap: 2048, shadowExtent: 110, grass: 180000, ao: true, raySamples: 32, dofSamples: 32, kelp: 0.55, fish: 130 },
-  High: { pixelRatio: 1.5, shadowMap: 4096, shadowExtent: 140, grass: 340000, ao: true, raySamples: 48, dofSamples: 48, kelp: 0.8, fish: 200 },
-  Ultra: { pixelRatio: 2, shadowMap: 4096, shadowExtent: 160, grass: 650000, ao: true, raySamples: 64, dofSamples: 64, kelp: 1, fish: 270 },
+  Low: { pixelRatio: 0.75, shadowMap: 2048, shadowExtent: 110, ao: false, raySamples: 16, dofSamples: 16, fx: 0.5 },
+  Medium: { pixelRatio: 1, shadowMap: 2048, shadowExtent: 130, ao: true, raySamples: 32, dofSamples: 32, fx: 0.75 },
+  High: { pixelRatio: 1.5, shadowMap: 4096, shadowExtent: 150, ao: true, raySamples: 48, dofSamples: 48, fx: 1 },
+  Ultra: { pixelRatio: 2, shadowMap: 4096, shadowExtent: 170, ao: true, raySamples: 64, dofSamples: 64, fx: 1.25 },
 };
 
 const hud = new HUD();
@@ -40,205 +37,141 @@ const step = async (p, msg) => {
 };
 
 async function init() {
-  loadRapier().catch(() => {}); // start the download now; Physics.create reports failures
   const canvas = document.getElementById('c');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
   renderer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(devicePixelRatio, QUALITY.High.pixelRatio));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
   renderer.info.autoReset = false;
-  if ('transmissionResolutionScale' in renderer) renderer.transmissionResolutionScale = 0.6;
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.25, 6000);
-  camera.position.set(40, 20, 30);
+  const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 30000);
+  camera.position.set(0, 20, 60);
 
   const audio = new AudioEngine();
 
-  await step(0.05, 'Sculpting terrain');
-  const terrain = new Terrain();
-  scene.add(terrain.mesh);
-
-  await step(0.2, 'Building the sky');
+  await step(0.05, 'Painting the sky');
   const atmosphere = new Atmosphere(renderer, scene);
-  const terrainShadow = new TerrainShadow(renderer, terrain);
 
-  await step(0.3, 'Filling the lake');
-  const water = createWater(terrain, { reflectionSize: 1024 });
-  scene.add(water);
+  await step(0.12, 'Raising the swell');
+  const ocean = new Ocean(renderer);
+  scene.add(ocean.mesh);
+  const islands = new Islands(scene);
+  ocean.setShallows(islands.shallows);
+  const clouds = new Clouds(scene);
 
-  await step(0.4, 'Growing the forest');
-  const veg = createVegetation(terrain);
-  scene.add(veg.group);
+  await step(0.22, 'Fitting out the task group');
+  const fx = new FX(scene);
+  const ballistics = new Ballistics(scene);
+  const ordnance = new Ordnance(scene, { fx, audio, ocean });
+  const fleet = new Fleet(scene, { fx, audio, ocean, ballistics });
 
-  await step(0.6, 'Raising the monument');
-  const monument = createMonument();
-  scene.add(monument.group);
+  await step(0.5, 'Fueling the strike');
+  const air = new Air(scene, { fx, audio, ordnance });
 
-  await step(0.68, 'Planting grass');
-  const grass = new Grass(terrain, { count: QUALITY.High.grass });
-  scene.add(grass.mesh);
+  // Hellcats spotted on the carrier deck, engines turning
+  const parking = fleet.carrier.model.parking || [];
+  const hellcat = buildAircraft('hellcat');
+  const parked = new THREE.InstancedMesh(hellcat.geometry.clone(), createAircraftMaterial('hellcat'), Math.max(parking.length, 1));
+  const parkedState = new Float32Array(Math.max(parking.length, 1) * 4);
+  for (let i = 0; i < parking.length; i++) parkedState[i * 4 + 1] = Math.random() * 6;
+  parked.geometry.setAttribute('aState', new THREE.InstancedBufferAttribute(parkedState, 4));
+  parked.count = parking.length;
+  parked.castShadow = parked.receiveShadow = true;
+  parked.frustumCulled = false;
+  scene.add(parked);
+  const parkLocal = parking.map((p) => {
+    const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(hellcat.parked?.pitch || 0, p.yaw, 0, 'YXZ'));
+    const z = THREE.MathUtils.clamp(p.pos.z, -fleet.carrier.halfLength, fleet.carrier.halfLength);
+    m.setPosition(p.pos.x, fleet.carrier.model.deckAt(z) + (hellcat.parked?.height ?? 2), p.pos.z);
+    return m;
+  });
 
-  await step(0.72, 'Stirring the lake');
-  const lakeLife = new Underwater(terrain, { kelp: QUALITY.High.kelp, fish: QUALITY.High.fish });
-  scene.add(lakeLife.group);
-
-  await step(0.75, 'Waking the valley');
-  const particles = new Particles(terrain);
-  scene.add(particles.group);
-  const fauna = new Fauna(scene, terrain);
+  await step(0.62, 'Manning the guns');
+  const gunner = new Gunner(camera, fleet, { fx, audio, ballistics, dom: renderer.domElement });
+  fleet.addCrew();
   const weather = new Weather(scene, audio);
-  const skyfx = new SkyFX(scene, monument.crystalPos);
-
-  // ---------------------------------------------------------------- quest
-  const game = { activated: false, finaleT: -1, light: 1, hurt: 0, sinceHit: 99, dead: false };
-  const hinted = {};
-  const quest = new Quest(scene, terrain, monument.crystalPos, {
-    onCollect: (n, total) => {
-      audio.pickup(n);
-      hud.toast('Wisp gathered', `${n} of ${total}`);
-      updateObjective();
-    },
-    onDeliver: () => audio.deliver(),
-    onComplete: () => startFinale(),
-  });
-
-  const updateObjective = () => {
-    if (game.activated) {
-      hud.setObjective('The valley awakens', 'All wisps returned.<small>Explore freely. Try the night sky, a storm, or photo mode (P).</small>');
-    } else if (quest.collected === quest.total) {
-      hud.setObjective('Return', 'The wisps are gathering at the <b>monument</b>.');
-    } else {
-      hud.setObjective(
-        'The Valley of Wisps',
-        `Gather the wisps <b>${quest.collected} / ${quest.total}</b><small>Follow the pillars of light and the markers on your compass.</small>`
-      );
-    }
-  };
-  updateObjective();
-
-  // ---------------------------------------------------------------- creatures
-  await step(0.78, 'Summoning the creatures');
-  const physics = await Physics.create(terrain, {
-    colliders: [...veg.colliders, ...monument.colliders, ...lakeLife.colliders],
-    discs: [{ r: 16, top: PLATEAU_HEIGHT + 0.2 }, { r: 14, top: monument.floorTop }],
-  });
-  const banishColor = new THREE.Color(0.75, 0.6, 1);
-  const creatures = new Creatures(scene, terrain, physics, {
-    onHit: (e) => shadeHit(e),
-    onBanish: (p) => {
-      audio.banish();
-      quest.burstAt(p, banishColor);
-    },
-  });
-  const orbs = new LightOrbs(scene, physics);
+  const director = new Director({ air, fleet, hud, audio, gunner, ordnance, ballistics });
+  const cinematic = new Cinematic(camera, fleet, air);
 
   patchSceneFog(scene);
 
-  // Grass doesn't need to appear in the lake reflection; it is the most expensive draw.
-  // Everything under the surface is clipped by the mirror anyway, so skip it too.
-  const waterBefore = water.onBeforeRender;
-  water.onBeforeRender = function (...args) {
-    const g = grass.mesh.visible, r = weather.rain.visible;
-    grass.mesh.visible = false;
-    weather.rain.visible = false;
-    lakeLife.setReflection(true);
-    waterBefore.apply(this, args);
-    grass.mesh.visible = g;
-    weather.rain.visible = r;
-    lakeLife.setReflection(false);
-  };
-
-  await step(0.82, 'Preparing the lens');
+  await step(0.72, 'Preparing the lens');
   const post = new PostFX(renderer, scene, camera);
-
-  const player = new Player(camera, renderer.domElement, terrain, {
-    colliders: [...veg.colliders, ...monument.colliders, ...lakeLife.colliders],
-    groundOverride: (x, z) => {
-      const r = Math.hypot(x, z);
-      if (r < 14) return monument.floorTop;
-      if (r < 16) return PLATEAU_HEIGHT + 0.2;
-      return -Infinity;
-    },
-  });
-  player.dynamicColliders = creatures.colliders;
-  player.on('step', (surface, k) => audio.footstep(surface, k));
-  player.on('land', (k) => audio.land(k));
-  player.on('splash', () => audio.splash());
-  player.on('jump', () => audio.footstep(player.surfaceAt(player.feet.x, player.feet.z), 0.6));
 
   // ---------------------------------------------------------------- settings
   const params = {
     quality: 'High',
     dynamicRes: true,
-    elevation: 7,
-    azimuth: 105,
-    dayCycle: false,
-    cycleSpeed: 1.5,
+    difficulty: 'Gunner',
+    leadSight: 'Auto',
+    brackets: true,
+    sensitivity: 1,
+    invertY: false,
+    elevation: 34,
+    azimuth: 262,
+    autoSun: true,
     weather: 'Clear',
     exposure: 1.0,
     autoExposure: true,
-    exposureKey: 0.16,
+    exposureKey: 0.17,
     toneMapping: 'ACES Filmic',
-    grade: 'Natural',
+    grade: 'Kodachrome',
     ao: true,
     aoIntensity: 1.0,
     bloom: true,
-    bloomStrength: 0.35,
+    bloomStrength: 0.32,
     bloomRadius: 0.5,
-    bloomThreshold: 3.2,
-    godRays: 1,
-    lensFlare: 1,
-    chromatic: 0.01,
-    vignette: 0.35,
-    grain: 0.03,
+    bloomThreshold: 3.0,
+    godRays: 0.55,
+    lensFlare: 0.7,
+    chromatic: 0.008,
+    vignette: 0.32,
+    grain: 0.035,
     sharpen: 0.35,
-    fogDensity: 0.0008,
-    fogFalloff: 0.012,
-    turbidity: 4.5,
-    rayleigh: 1.6,
-    grassCount: QUALITY.High.grass,
-    lakeLife: true,
+    fogDensity: 0.00009,
+    fogFalloff: 0.0022,
+    turbidity: 3.2,
+    rayleigh: 1.9,
     fov: 62,
     dofAperture: 0.5,
     dofMaxBlur: 14,
     dofAuto: true,
-    dofFocus: 20,
+    dofFocus: 60,
     volume: 0.8,
-    music: 0.5,
+    music: 0.45,
     capture: () => (captureRequested = true),
   };
   let captureRequested = false;
   let resScale = 1;
+  let mode = 'cinematic'; // cinematic | gun | photo
+  let paused = false;
+  let inGame = false;
+  let prevMode = 'cinematic';
 
   const basePixelRatio = () => Math.min(devicePixelRatio, QUALITY[params.quality].pixelRatio);
   const applyPixelRatio = () => {
-    const full = player.mode === 'photo' || !params.dynamicRes;
+    const full = mode === 'photo' || !params.dynamicRes;
     renderer.setPixelRatio(basePixelRatio() * (full ? 1 : resScale));
     post.setSize(innerWidth, innerHeight);
   };
-
   const applyQuality = (name) => {
     const q = QUALITY[name];
     resScale = 1;
     applyPixelRatio();
     atmosphere.setShadowQuality(q.shadowMap, q.shadowExtent);
-    params.grassCount = q.grass;
-    grass.setCount(q.grass);
-    lakeLife.setQuality(q.kelp, q.fish);
     params.ao = q.ao;
     post.gtao.enabled = q.ao;
     post.lens.material.defines.RAY_SAMPLES = q.raySamples;
     post.lens.material.needsUpdate = true;
     post.dof.material.defines.SAMPLES = q.dofSamples;
     post.dof.material.needsUpdate = true;
+    fx.budget = q.fx;
     gui.controllersRecursive().forEach((c) => c.updateDisplay());
   };
-
   const toneMaps = {
     'ACES Filmic': THREE.ACESFilmicToneMapping,
     AgX: THREE.AgXToneMapping,
@@ -252,22 +185,29 @@ async function init() {
     resScale = 1;
     applyPixelRatio();
   });
+  const fPlay = gui.addFolder('Gameplay');
+  fPlay.add(params, 'difficulty', Object.keys(DIFFICULTY)).name('Difficulty (next battle)').listen();
+  fPlay.add(params, 'leadSight', ['Auto', 'On', 'Off']).name('Lead computing sight');
+  fPlay.add(params, 'brackets').name('Target brackets');
+  fPlay.add(params, 'sensitivity', 0.2, 3, 0.05).name('Mouse sensitivity').onChange((v) => (gunner.sensitivity = v));
+  fPlay.add(params, 'invertY').name('Invert elevation').onChange((v) => (gunner.invertY = v));
+  fPlay.add(params, 'fov', 45, 90, 1).name('Field of view');
 
   const fWorld = gui.addFolder('Time & weather');
-  fWorld.add(params, 'elevation', -20, 80, 0.1).name('Sun elevation').listen();
+  fWorld.add(params, 'autoSun').name('Sun follows the battle');
+  fWorld.add(params, 'elevation', -15, 80, 0.1).name('Sun elevation').listen();
   fWorld.add(params, 'azimuth', 0, 360, 0.1).name('Sun azimuth');
-  fWorld.add(params, 'dayCycle').name('Animate day cycle').listen();
-  fWorld.add(params, 'cycleSpeed', 0.1, 10, 0.1).name('Cycle speed');
   fWorld.add(params, 'weather', Object.keys(WEATHER)).name('Weather').onChange((v) => weather.set(v)).listen();
+  fWorld.close();
 
   const fCam = gui.addFolder('Camera & photo');
-  fCam.add(params, 'fov', 40, 100, 1).name('Field of view');
   fCam.add(params, 'grade', Object.keys(GRADES)).name('Color grade').onChange((v) => post.setGrade(v));
   fCam.add(params, 'dofAuto').name('DoF autofocus');
-  fCam.add(params, 'dofFocus', 1, 300, 0.5).name('DoF focus distance');
+  fCam.add(params, 'dofFocus', 1, 2000, 0.5).name('DoF focus distance');
   fCam.add(params, 'dofAperture', 0, 3, 0.01).name('DoF aperture');
   fCam.add(params, 'dofMaxBlur', 2, 30, 1).name('DoF max blur');
   fCam.add(params, 'capture').name('Capture screenshot (K)');
+  fCam.close();
 
   const fPost = gui.addFolder('Post processing');
   fPost.add(params, 'autoExposure').name('Auto exposure');
@@ -289,140 +229,299 @@ async function init() {
   fPost.close();
 
   const fAtmo = gui.addFolder('Atmosphere');
-  fAtmo.add(params, 'fogDensity', 0, 0.005, 0.0001).name('Fog density');
-  fAtmo.add(params, 'fogFalloff', 0.001, 0.08, 0.001).name('Fog height falloff');
+  fAtmo.add(params, 'fogDensity', 0, 0.001, 0.00001).name('Haze density');
+  fAtmo.add(params, 'fogFalloff', 0.0005, 0.02, 0.0001).name('Haze height falloff');
   fAtmo.add(params, 'turbidity', 0, 20, 0.1).name('Turbidity').onChange(() => (atmosphere.lastEnvKey = ''));
   fAtmo.add(params, 'rayleigh', 0, 4, 0.01).name('Rayleigh').onChange(() => (atmosphere.lastEnvKey = ''));
-  fAtmo.add(params, 'grassCount', 0, 1000000, 10000).name('Grass blades').onFinishChange((v) => grass.setCount(v));
-  fAtmo.add(params, 'lakeLife').name('Lake life').onChange((v) => lakeLife.setEnabled(v));
   fAtmo.close();
 
   const fAudio = gui.addFolder('Audio');
   fAudio.add(params, 'volume', 0, 1, 0.01).name('Master volume').onChange((v) => audio.setVolume(v));
   fAudio.add(params, 'music', 0, 1, 0.01).name('Music').onChange((v) => audio.setMusicVolume(v));
   fAudio.close();
+  audio.setMusicVolume(params.music);
+  post.setGrade(params.grade);
 
   const stats = new Stats();
   stats.dom.classList.add('stats');
   document.body.appendChild(stats.dom);
 
+  // ---------------------------------------------------------------- events between systems
+  const nearCam = (p, r) => p.distanceTo(camera.position) < r;
+  const blastNear = (p, radius, k = 1) => {
+    if (mode !== 'gun') return;
+    const d = p.distanceTo(camera.position);
+    if (d < radius) {
+      const f = 1 - d / radius;
+      gunner.shake(f * k);
+      gunner.deafen = Math.max(gunner.deafen, f * k * 0.9);
+      if (f > 0.3) hud.damageFlash(f * k);
+    }
+  };
+  let splashBudget = 0;
+
+  const ballCtx = {
+    planes: air.planes,
+    hitPlane: (p, point, kind, owner, dmg) => {
+      air.hit(p, point, kind, owner, dmg);
+      if (owner === OWNER.PLAYER) {
+        hud.hitMarker();
+        audio.hitMarker();
+      }
+    },
+    proximity: (point, owner, scale) => air.proximity(point, owner, scale),
+    water: (point, kind) => {
+      if (splashBudget <= 0 || !nearCam(point, 3500)) return;
+      splashBudget--;
+      const size = kind === '5in' ? 0.25 : kind === '40mm' ? 0.12 : 0.06;
+      fx.splash(point, size);
+      ocean.stamp(point.x, point.z, point.x, point.z, 2 + size * 10, 0.7, 0.6, 0.3);
+    },
+    expire: (point, kind, owner, scale) => {
+      if (kind === '5in') air.proximity(point, owner, scale);
+      else if (nearCam(point, 5000)) fx.airburst(point);
+    },
+    shipAt: (p) => fleet.shipAt(p, 0.3),
+    hitShip: (ship, p) => {
+      fleet.damage(ship, 'strafe', p);
+      if (nearCam(p, 1500)) fx.sparks(p, 4, 14);
+      if (nearCam(p, 300)) audio.hit(p, 'steel');
+      blastNear(p, 25, 0.35);
+    },
+  };
+
+  air.events.kill = (p, info) => director.onKill(p, info);
+  air.events.escape = (p) => director.onEscape(p);
+  air.events.crash = (p, ship, alive) => {
+    if (ship) {
+      const kami = p.role === 'kamikaze' && (alive || p.phase === 'terminal');
+      fx.explosion(p.pos, kami ? 1.2 : 0.7);
+      audio.explosion(p.pos, kami ? 1 : 0.5);
+      fleet.damage(ship, kami ? 'kamikaze' : 'wreck', p.pos);
+      blastNear(p.pos, kami ? 90 : 50, 1);
+    } else {
+      fx.splash(p.pos.clone().setY(0), p.type === 'betty' ? 0.9 : 0.55);
+      fx.explosion(p.pos.clone().setY(1), 0.3, { debris: false, fireball: p.ordnance });
+      audio.splash(p.pos, 0.6);
+      ocean.stamp(p.pos.x, p.pos.z, p.pos.x, p.pos.z, 14, 1, 1, 0.3);
+    }
+  };
+  ordnance.events.bombHit = (ship, pos) => {
+    fx.explosion(pos, 1);
+    audio.explosion(pos, 0.7);
+    fleet.damage(ship, 'bomb', pos);
+    blastNear(pos, 90, 1);
+  };
+  ordnance.events.nearMiss = (pos, ship, dist) => {
+    fx.splash(pos, 1);
+    audio.splash(pos, 0.9);
+    ocean.stamp(pos.x, pos.z, pos.x, pos.z, 18, 1, 1, 0.3);
+    if (ship && dist < 22) fleet.damage(ship, 'nearMiss', pos);
+    blastNear(pos, 70, 0.6);
+  };
+  ordnance.events.torpedoHit = (ship, pos) => {
+    fx.splash(pos, 1.7);
+    fx.explosion(pos.clone().setY(2), 0.8, { fireball: false });
+    audio.torpedoHit(pos);
+    ocean.stamp(pos.x, pos.z, pos.x, pos.z, 30, 1, 1, 0.3);
+    fleet.damage(ship, 'torpedo', pos);
+    if (ship === fleet.own) blastNear(camera.position, 10, 0.8);
+  };
+  ordnance.events.torpedoLaunched = (t) => director.onTorpedo(t);
+  fleet.events.damaged = (ship, kind) => director.onShipDamaged(ship, kind);
+  fleet.events.sunk = (ship) => director.onShipSunk(ship);
+  fx.onWaterHit = (p, size) => {
+    if (nearCam(p, 2500)) fx.splash(p.clone().setY(0), size);
+  };
+  gunner.events.switch = (st) => hud.setStation(st, gunner.index, gunner.stations.length);
+
+  // the ship's plan: hold Ctrl to bring it up with the mouse free, click a mount to man it. The
+  // battle runs on while it's up.
+  let mapOpen = false;
+  const resumeGun = () => renderer.domElement.requestPointerLock()?.catch?.(() => {});
+  const shipMap = new ShipMap(renderer, fleet.own, gunner, {
+    onPick: (i) => {
+      gunner.select(i);
+      closeMap();
+    },
+  });
+  const openMap = () => {
+    if (mapOpen || mode !== 'gun' || !gunner.active || !inGame || document.body.classList.contains('ended')) return;
+    mapOpen = true;
+    gunner.firing = false;
+    gunner.zoom = false;
+    shipMap.show();
+    document.exitPointerLock();
+  };
+  const closeMap = () => {
+    if (!mapOpen) return;
+    mapOpen = false;
+    shipMap.hide();
+    resumeGun();
+  };
+  addEventListener('keyup', (e) => {
+    if (e.key === 'Control') closeMap();
+  });
+  addEventListener('blur', () => {
+    if (mapOpen) {
+      mapOpen = false;
+      shipMap.hide();
+    }
+  });
+  document.addEventListener('pointerlockerror', () => {
+    if (inGame && mode === 'gun') hud.hint('Click to take the gun', 2500);
+  });
+  hud.setStation(gunner.station, 0, gunner.stations.length);
+
+  director.events.end = (report) => {
+    setTimeout(() => {
+      gunner.setActive(false);
+      document.exitPointerLock?.();
+      hud.showEnd(report, {
+        onRestart: () => {
+          hud.hideEnd();
+          beginBattle();
+        },
+        onContinue: () => {
+          hud.hideEnd();
+          director.continueEndless();
+          gunner.setActive(true);
+          renderer.domElement.requestPointerLock();
+        },
+      });
+    }, report.victory ? 2500 : 7000);
+  };
+
   // ---------------------------------------------------------------- flow
   const playBtn = document.getElementById('play');
-  let saved = null; // walk state while watching the cinematic camera
+  const diffBtns = [...document.querySelectorAll('#difficulty button')];
+  diffBtns.forEach((b) =>
+    b.addEventListener('click', () => {
+      params.difficulty = b.dataset.d;
+      diffBtns.forEach((o) => o.classList.toggle('on', o === b));
+    })
+  );
 
-  const enterGame = () => {
+  const setMode = (m) => {
+    mode = m;
+    hud.setMode(m);
+    gunner.setActive(m === 'gun' && !paused && inGame && director.state !== 'victory' && director.state !== 'defeat');
+    if (m !== 'gun') hud.hideSight();
+    applyPixelRatio();
+  };
+
+  const beginBattle = () => {
     audio.start();
-    player.controls.lock();
-    if (player.mode === 'cinematic') {
-      hud.blackout(true);
-      setTimeout(() => {
-        if (saved) {
-          player.mode = 'walk';
-          player.feet.copy(saved.feet);
-          camera.quaternion.copy(saved.quat);
-          player.velocity.set(0, 0, 0);
-        } else {
-          player.startExploring();
-          setTimeout(() => {
-            hud.toast('Valley of Wisps', 'Seven lights are scattered across the valley', 4200);
-            setTimeout(() => hud.hint('Follow the pillars of light and the markers on the compass'), 3500);
-          }, 700);
-        }
-        hud.showTitle(false);
-        hud.blackout(false);
-      }, 900);
-    } else {
-      hud.showTitle(false);
-    }
-  };
-  playBtn.addEventListener('click', enterGame);
-  const throwOrb = () => {
-    if (player.mode !== 'walk' || game.dead || !document.pointerLockElement) return;
-    const dir = camera.getWorldDirection(new THREE.Vector3());
-    const origin = camera.position.clone().addScaledVector(dir, 0.6);
-    origin.y -= 0.15;
-    if (orbs.throw(origin, dir, player.velocity)) audio.orbThrow();
-    else hud.hint('Out of light. Orbs recharge over time', 1500);
-  };
-  renderer.domElement.addEventListener('mousedown', (e) => {
-    if (e.button === 0) throwOrb();
-  });
-
-  // a shade's blow drains light; at zero the dark takes you back to the crystal
-  const shadeHit = (e) => {
-    if (game.dead || player.mode !== 'walk') return;
-    game.light = Math.max(0, game.light - 0.34);
-    game.sinceHit = 0;
-    game.hurt = 1;
-    const dx = player.feet.x - e.position.x, dz = player.feet.z - e.position.z, d = Math.hypot(dx, dz) || 1;
-    player.knockback((dx / d) * 8, (dz / d) * 8, 4.5);
-    audio.shadeHit();
-    if (game.light <= 0) fallDark();
-    else if (!hinted.hit) {
-      hinted.hit = true;
-      hud.hint('Shades drain your light. It returns with time, and quickly inside the stone circle', 6000);
-    }
-  };
-  const fallDark = () => {
-    game.dead = true;
-    audio.fallDark();
     hud.blackout(true);
     setTimeout(() => {
-      creatures.scatter(player.feet, 90);
-      player.respawn();
-      game.light = 1;
-      game.hurt = 0;
-      game.dead = false;
+      director.start(params.difficulty);
+      gunner.newBattle();
+      inGame = true;
+      document.body.classList.add('in-game');
+      paused = false;
+      gunner.select(gunner.home);
+      setMode('gun');
+      hud.showTitle(false);
       hud.blackout(false);
-      hud.toast('The dark took you', 'You wake beside the crystal', 3500);
-    }, 1500);
+      playBtn.textContent = 'Resume';
+      hud.hint('Mouse to train and elevate, hold the left button to fire. Hold Ctrl for the ship plan to change mounts.', 7000);
+    }, 900);
   };
 
-  renderer.domElement.addEventListener('click', () => {
-    if (player.mode === 'photo' || ((player.mode === 'walk' || player.mode === 'fly') && !document.body.classList.contains('title'))) {
-      player.controls.lock();
+  document.getElementById('restart').addEventListener('click', () => {
+    renderer.domElement.requestPointerLock();
+    beginBattle();
+  });
+
+  playBtn.addEventListener('click', () => {
+    renderer.domElement.requestPointerLock();
+    if (!inGame) beginBattle();
+    else {
+      audio.start();
+      paused = false;
+      hud.showTitle(false);
+      setMode('gun');
     }
   });
 
-  player.controls.addEventListener('lock', () => document.body.classList.add('locked'));
-  player.controls.addEventListener('unlock', () => {
-    document.body.classList.remove('locked');
-    if (player.mode === 'walk' || player.mode === 'fly') {
-      playBtn.textContent = 'Resume';
+  renderer.domElement.addEventListener('click', () => {
+    if (inGame && mode === 'gun' && !document.pointerLockElement && !document.body.classList.contains('ended')) {
+      renderer.domElement.requestPointerLock();
+      paused = false;
+      hud.showTitle(false);
+      setMode('gun');
+    } else if (mode === 'photo' && !document.pointerLockElement) renderer.domElement.requestPointerLock();
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    const locked = !!document.pointerLockElement;
+    document.body.classList.toggle('locked', locked);
+    if (!locked && mapOpen) return; // the mouse is out for the ship's plan, not to pause
+    if (!locked && inGame && mode === 'gun' && !document.body.classList.contains('ended')) {
+      // pause the battle while the mouse is released
+      paused = true;
+      gunner.setActive(false);
       hud.showTitle(true);
     }
   });
 
   const togglePhoto = () => {
-    if (player.mode === 'cinematic') return;
-    const on = player.mode !== 'photo';
-    player.setPhoto(on);
-    applyPixelRatio();
-    if (!on && !document.pointerLockElement) {
-      playBtn.textContent = 'Resume';
-      hud.showTitle(true);
+    if (mode === 'photo') {
+      cinematic.exitPhoto();
+      setMode(prevMode);
+      if (prevMode === 'gun' && inGame) renderer.domElement.requestPointerLock();
+    } else {
+      prevMode = mode;
+      cinematic.enterPhoto();
+      setMode('photo');
     }
   };
 
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
+    const playing = mode === 'gun' && gunner.active;
     switch (e.code) {
+      case 'Digit1':
+      case 'Digit2':
+      case 'Digit3':
+      case 'Digit4':
+      case 'Digit5':
+      case 'Digit6':
+      case 'Digit7':
+      case 'Digit8':
+      case 'Digit9':
+        if (playing && !e.ctrlKey) gunner.select(Number(e.code.slice(5)) - 1);
+        break;
+      case 'ControlLeft':
+      case 'ControlRight':
+        openMap();
+        break;
+      case 'KeyQ':
+        if (playing) gunner.select((gunner.index + gunner.stations.length - 1) % gunner.stations.length);
+        break;
+      case 'KeyE':
+        if (playing) gunner.select((gunner.index + 1) % gunner.stations.length);
+        break;
+      case 'KeyR':
+        if (playing) gunner.reload();
+        break;
+      case 'KeyX':
+        if (playing && gunner.toggleView()) hud.hint(gunner.view === 'pointer' ? (gunner.ringSight ? "Pointer's ring sight" : "Pointer's sight hood") : 'Centre view', 1500);
+        break;
       case 'KeyC':
-        if (player.mode === 'walk' || player.mode === 'fly') saved = { feet: player.feet.clone(), quat: camera.quaternion.clone() };
-        if (player.mode !== 'cinematic') {
-          player.setCinematic();
-          playBtn.textContent = saved ? 'Resume' : 'Begin';
-          hud.showTitle(true);
+        if (mode === 'gun' && inGame) {
+          setMode('cinematic');
+          hud.hint('Watching the battle. Press C to return to your gun.', 4000);
+        } else if (mode === 'cinematic' && inGame) {
+          setMode('gun');
+          renderer.domElement.requestPointerLock();
         }
         break;
       case 'KeyP':
         togglePhoto();
         break;
-      case 'KeyE':
-        throwOrb();
-        break;
       case 'KeyK':
-        if (player.mode === 'photo') captureRequested = true;
+        if (mode === 'photo') captureRequested = true;
         break;
       case 'KeyH':
         document.body.classList.toggle('ui-hidden');
@@ -437,10 +536,6 @@ async function init() {
         hud.hint(`Weather: ${params.weather}`, 1800);
         break;
       }
-      case 'KeyT':
-        params.dayCycle = !params.dayCycle;
-        hud.hint(params.dayCycle ? 'Day cycle running' : 'Day cycle paused', 1500);
-        break;
       case 'F3':
         e.preventDefault();
         document.body.classList.toggle('debug');
@@ -454,20 +549,6 @@ async function init() {
     renderer.setSize(innerWidth, innerHeight);
     post.setSize(innerWidth, innerHeight);
   });
-
-  function startFinale() {
-    game.finaleT = 0;
-    audio.finale();
-    hud.toast('The valley awakens', 'All seven wisps have returned', 5000);
-    const flash = document.getElementById('flash');
-    flash.classList.add('on');
-    setTimeout(() => flash.classList.remove('on'), 60);
-    skyfx.shockwave();
-    game.activated = true;
-    creatures.banishAll();
-    audio.state.activated = 1;
-    updateObjective();
-  }
 
   const saveCapture = () => {
     renderer.domElement.toBlob((blob) => {
@@ -485,10 +566,12 @@ async function init() {
   };
 
   // ---------------------------------------------------------------- warm up
-  await step(0.9, 'Compiling shaders');
+  await step(0.85, 'Compiling shaders');
   weather.set(params.weather);
   atmosphere.set(params.elevation, params.azimuth);
-  terrainShadow.update(atmosphere.lightDir);
+  director.startAttract();
+  cinematic.update(0.016);
+  fleet.update(0.016, 0, { air, ordnance, camera });
   await renderer.compileAsync(scene, camera);
   atmosphere.update(new THREE.Vector3(), 0);
   renderer.shadowMap.needsUpdate = true;
@@ -497,173 +580,114 @@ async function init() {
   hud.ready();
   playBtn.disabled = false;
   hud.blackout(false);
+  hud.setMode('cinematic');
 
   // ---------------------------------------------------------------- loop
   const timer = new THREE.Timer();
   const sunColorN = new THREE.Color();
+  const ambient = new THREE.Color();
   const fwd = new THREE.Vector3();
   const focus = new THREE.Vector3();
+  const pm = new THREE.Matrix4();
   let t = 0;
   let sunTimer = 0;
   let hudTimer = 0;
+  let shipTimer = 0;
   let resTimer = 0;
   let frameAvg = 16;
-  let wasUnderwater = false;
-  let hintedSwim = false;
+  const audioPlanes = [];
 
-  renderer.setAnimationLoop(() => {
+  // one frame of the game; forcedDt lets tests step the simulation without real time
+  const frame = (forcedDt, draw = true) => {
     timer.update();
-    const rawDt = THREE.MathUtils.clamp(timer.getDelta(), 0, 0.1);
+    const rawDt = forcedDt ?? THREE.MathUtils.clamp(timer.getDelta(), 0, 0.1);
     frameAvg += (rawDt * 1000 - frameAvg) * 0.05;
-    const photo = player.mode === 'photo';
-    const dt = photo ? 0 : Math.min(rawDt, 0.05);
+    const photo = mode === 'photo';
+    const dt = photo || paused ? 0 : Math.min(rawDt, 0.05);
     t += dt;
     globalUniforms.uTime.value = t;
+    splashBudget = 6;
 
-    player.update(Math.min(rawDt, 0.05));
-    hud.setMode(player.mode);
-
-    // time of day (and the finale's slide into night)
-    if (game.finaleT >= 0) {
-      game.finaleT += dt;
-      monument.setPower(Math.min(game.finaleT / 3, 1));
-      if (params.elevation > -12 && game.finaleT > 2) {
-        params.elevation = Math.max(-12, params.elevation - dt * 2.2);
-        params.dayCycle = false;
-      }
-    }
-    if (params.dayCycle) {
-      params.elevation += dt * params.cycleSpeed;
-      if (params.elevation > 80) params.elevation = -20;
-    }
+    // sun slides toward the director's time of day
+    if (params.autoSun && dt > 0) params.elevation += (director.sunTarget - params.elevation) * (1 - Math.exp(-dt * 0.02));
     atmosphere.setStorm(weather.state.storm);
-    sunTimer -= dt;
+    sunTimer -= rawDt;
     const u = atmosphere.uniforms;
-    u.cloudCoverage.value = weather.state.cover;
-    u.cloudDensity.value = 0.5 + weather.state.storm * 0.4;
+    u.cloudCoverage.value = weather.state.cover * 0.45;
+    u.cloudDensity.value = 0.45 + weather.state.storm * 0.4;
     u.turbidity.value = params.turbidity;
     u.rayleigh.value = params.rayleigh;
     const stormKey = weather.state.storm.toFixed(2);
     if (
       sunTimer <= 0 &&
-      (params.elevation !== atmosphere.elevation || params.azimuth !== atmosphere.azimuth || atmosphere.lastEnvKey === '' || !atmosphere.lastEnvKey.endsWith(stormKey))
+      (Math.abs(params.elevation - atmosphere.elevation) > 0.4 || params.azimuth !== atmosphere.azimuth || atmosphere.lastEnvKey === '' || !atmosphere.lastEnvKey.endsWith(stormKey))
     ) {
       atmosphere.set(params.elevation, params.azimuth);
-      terrainShadow.update(atmosphere.lightDir);
-      sunTimer = 0.2;
+      sunTimer = 0.25;
     }
     scene.environmentIntensity = atmosphere.baseEnvIntensity * (1 - weather.state.storm * 0.45) + weather.flash * 2.5;
 
-    // shadow frustum follows what the camera is looking at
+    // the world: ships, aircraft, ordnance, the battle
+    fleet.update(dt, t, { air, ordnance, camera });
+    if (dt > 0) {
+      air.update(dt, t, { fleet, ballistics, camera });
+      ordnance.update(dt, fleet, camera);
+      const was = director.state;
+      director.update(dt);
+      // between raids the passers and the hoist restock the ready racks and lockers
+      if (was === 'raid' && director.state !== 'raid') gunner.restock();
+    }
+    gunner.update(dt, rawDt, { air });
+    if (mode === 'cinematic') cinematic.update(rawDt);
+    else if (mode === 'photo') cinematic.updatePhoto(rawDt);
+
+    // camera field of view (the sight zooms)
+    const zoom = mode === 'gun' && gunner.zoom;
+    document.body.classList.toggle('zoom', zoom);
+    document.body.classList.toggle('ringsight', mode === 'gun' && gunner.ringSight);
+    const targetFov = zoom ? 24 : params.fov;
+    if (Math.abs(camera.fov - targetFov) > 0.01) {
+      camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-rawDt * 10));
+      camera.updateProjectionMatrix();
+    }
+
+    if (dt > 0) ballistics.update(dt, camera, ballCtx);
+    else ballistics.render();
+    ballistics.mat.uniforms.uPixel.value = (2 * Math.tan((camera.fov * Math.PI) / 360)) / (innerHeight * renderer.getPixelRatio()) * 1.6;
+
+    // shadows follow what the camera looks at
     camera.getWorldDirection(fwd);
     fwd.y = 0;
     fwd.normalize();
-    focus.copy(camera.position).addScaledVector(fwd, atmosphere.shadowExtent * 0.45);
-    focus.y = terrain.getHeight(focus.x, focus.z);
+    focus.copy(camera.position).addScaledVector(fwd, atmosphere.shadowExtent * 0.4);
+    focus.y = 0;
     atmosphere.update(focus, t);
-
     const light = atmosphere.sun;
     sunColorN.copy(light.color).multiplyScalar(light.intensity / 6.5);
     globalUniforms.uSunDirW.value.copy(atmosphere.lightDir);
     globalUniforms.uSunColorN.value.copy(sunColorN);
+    ambient.copy(scene.fog.color).multiplyScalar(0.9 + 0.3 * (1 - weather.state.storm));
 
-    const day = THREE.MathUtils.smoothstep(params.elevation, -4, 8);
-    const playing = player.mode === 'walk' || player.mode === 'fly';
-    grass.update(camera, playing ? player.feet : null);
-    monument.update(t);
-    particles.update(t, camera, atmosphere.lightDir, sunColorN, atmosphere.night * (1 - weather.state.rain), renderer.getPixelRatio());
-    fauna.update(dt, t, camera.position, day, weather.state.rain);
+    const pixelAngle = (2 * Math.tan((camera.fov * Math.PI) / 360)) / (innerHeight * renderer.getPixelRatio());
+    ocean.update(dt, camera, { amp: 1 + weather.state.storm * 1.2, whitecap: 0.22 + weather.state.wind * 0.12, pixelAngle, foam: draw });
+    islands.update(camera);
+    const lightEnv = { sunDir: atmosphere.lightDir, sunColor: sunColorN, sunIntensity: 6.5, ambient };
+    clouds.update(dt, camera, { ...lightEnv, cover: THREE.MathUtils.clamp(0.55 + weather.state.cover * 0.6, 0, 1) });
+    fx.wind.set(-5 * weather.state.wind, 0, 2 * weather.state.wind);
+    fx.update(dt, camera, lightEnv);
     weather.update(dt, t, camera, atmosphere);
-    skyfx.update(dt, t, atmosphere.night, weather.state.storm, game.activated);
-    const q = quest.update(dt, t, playing ? camera.position : new THREE.Vector3(0, -1e4, 0), playing, renderer.getPixelRatio());
 
-    // creatures and physics: AI, then character controllers, then the physics step
-    const walking = player.mode === 'walk';
-    const threat = game.activated ? 0 : Math.max(atmosphere.night, weather.state.storm * 0.75, quest.collected >= 2 ? 0.3 : 0);
-    creatures.think(dt, t, {
-      player: walking
-        ? {
-            pos: player.feet,
-            vel: player.velocity,
-            sprint: player.keys.ShiftLeft || player.keys.ShiftRight,
-            huntable: !game.dead && Math.hypot(player.feet.x, player.feet.z) > SANCTUARY,
-          }
-        : null,
-      camera: camera.position,
-      forward: fwd,
-      night: atmosphere.night,
-      threat,
-      lights: collectLights(quest.targets().map((w) => ({ pos: w.pos, r: 6 }))),
-    });
-    motorSystem(physics, dt, creatures.kcc);
-    physics.step(dt);
-    syncSystem();
-    creatures.render(dt, t);
-    orbs.update(dt, t, camera, {
-      onBounce: (p, k) => audio.orbBounce(k, p.distanceTo(camera.position)),
-      onSplash: (p, k) => p.distanceTo(camera.position) < 40 && audio.footstep('water', k),
-    });
-    if (creatures.hunting && walking && !hinted.shade) {
-      hinted.shade = true;
-      hud.hint('A shade is hunting you. Click or press E to throw light. Shades cannot enter the stone circle', 7000);
+    // parked Hellcats ride the carrier
+    for (let i = 0; i < parkLocal.length; i++) {
+      pm.multiplyMatrices(fleet.carrier.matrix, parkLocal[i]);
+      parked.setMatrixAt(i, pm);
     }
-
-    // light meter: recovers after a while, quickly inside the stone circle
-    if (!game.dead && dt > 0) {
-      game.sinceHit += dt;
-      const atCrystal = Math.hypot(player.feet.x, player.feet.z) < SANCTUARY;
-      if (game.sinceHit > 4 || atCrystal) game.light = Math.min(1, game.light + dt * (atCrystal ? 0.35 : 0.05));
-    }
-    game.hurt = Math.max(0, game.hurt - rawDt * 1.6);
-    if (playing) {
-      hud.setVitals(game.light, orbs.charges, orbs.maxCharges, orbs.recharge, creatures.dread > 0.05 || game.light < 1 || orbs.charges < orbs.maxCharges);
-      hud.setDread(Math.min(1, creatures.dread * 0.9 + game.hurt * 0.6));
-    } else hud.setDread(0);
-
-    const wu = water.material.uniforms;
-    wu.time.value = t;
-    wu.sunDirection.value.copy(atmosphere.lightDir);
-    wu.sunColor.value.copy(sunColorN);
-    wu.nightFactor.value = atmosphere.night;
-    wu.uRain.value = weather.state.rain;
-    wu.uStorm.value = weather.state.storm;
+    parked.instanceMatrix.needsUpdate = true;
+    parked.visible = !fleet.carrier.gone;
 
     scene.fog.density = params.fogDensity * weather.state.fog;
     globalUniforms.fogSunColor.value.copy(atmosphere.fogSunBase || globalUniforms.fogSunColor.value).multiplyScalar(1 - 0.9 * weather.state.storm);
     globalUniforms.fogHeightFalloff.value = params.fogFalloff;
-
-    // underwater
-    const underwater = camera.position.y < WATER_LEVEL - 0.05 && terrain.getHeight(camera.position.x, camera.position.z) < WATER_LEVEL;
-    const uw = post.underwater;
-    uw.uUnderwater.value = underwater ? 1 : 0;
-    uw.uWaterTint.value.setRGB(0.012, 0.06, 0.07).multiplyScalar(0.3 + 1.2 * sunColorN.g).addScalar(0.002);
-    lakeLife.update(dt, t, camera, {
-      underwater,
-      swimmer: player.swimming && playing ? player.feet : null,
-      sunDir: atmosphere.lightDir,
-      sunColor: sunColorN,
-      skyColor: scene.fog.color,
-      tint: uw.uWaterTint.value,
-      pixelRatio: renderer.getPixelRatio(),
-    });
-    if (underwater !== wasUnderwater) {
-      if (underwater && !hintedSwim && playing) {
-        hintedSwim = true;
-        hud.hint('Space to swim up');
-      }
-      wasUnderwater = underwater;
-    }
-    if (player.swimming && !hintedSwim && !underwater) {
-      hintedSwim = true;
-      hud.hint('Swimming: Q to dive, Space to rise');
-    }
-
-    // camera
-    const targetFov = params.fov + player.fovOffset;
-    if (Math.abs(camera.fov - targetFov) > 0.01) {
-      camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-rawDt * 6));
-      camera.updateProjectionMatrix();
-    }
 
     // post
     renderer.toneMapping = toneMaps[params.toneMapping];
@@ -673,34 +697,33 @@ async function init() {
     ex.key = params.exposureKey;
     post.gtao.blendIntensity = params.aoIntensity;
     post.bloom.enabled = params.bloom;
-    post.bloom.strength = params.bloomStrength * (1 + (game.activated ? 0.3 : 0));
+    post.bloom.strength = params.bloomStrength;
     post.bloom.radius = params.bloomRadius;
     post.bloom.threshold = params.bloomThreshold;
     const lu = post.lens.uniforms;
     lu.uFlare.value = params.lensFlare * (1 - weather.state.storm);
-    lu.uCA.value = params.chromatic;
+    lu.uCA.value = params.chromatic + gunner.trauma * 0.01;
     const gu = post.grade.uniforms;
-    gu.uVignette.value = params.vignette + creatures.dread * 0.25;
+    gu.uVignette.value = params.vignette + (zoom ? 0.35 : 0);
     gu.uGrain.value = params.grain;
     gu.uSharpen.value = params.sharpen;
-    gu.uFade.value = Math.max(player.fade, game.hurt * 0.35);
+    gu.uFade.value = mode === 'cinematic' ? cinematic.fade : 0;
 
-    const dofOn = player.mode === 'cinematic' || photo;
+    const dofOn = mode === 'cinematic' || photo;
     post.dof.enabled = dofOn;
     if (dofOn) {
       const du = post.dof.uniforms;
       du.uAuto.value = photo && params.dofAuto ? 1 : 0;
-      du.uFocus.value = photo ? params.dofFocus : player.focus;
-      du.uAperture.value = photo ? params.dofAperture : 0.45;
+      du.uFocus.value = photo ? params.dofFocus : cinematic.focus;
+      du.uAperture.value = photo ? params.dofAperture : 0.4;
       du.uMaxBlur.value = params.dofMaxBlur * renderer.getPixelRatio();
     }
-
     post.update(t, rawDt, atmosphere.sunDir, sunColorN, params.elevation);
     lu.uRays.value *= params.godRays * (1 - weather.state.storm);
 
     renderer.info.reset();
     renderer.shadowMap.needsUpdate = true;
-    post.render(rawDt);
+    if (draw) post.render(rawDt);
     if (captureRequested) {
       captureRequested = false;
       saveCapture();
@@ -708,17 +731,26 @@ async function init() {
     stats.update();
 
     // audio
-    const hGround = terrain.getHeight(camera.position.x, camera.position.z);
-    const shore = THREE.MathUtils.clamp(1 - Math.abs(hGround - 0.3) / 5, 0, 1) * (camera.position.y - WATER_LEVEL < 12 ? 1 : 0);
+    audioPlanes.length = 0;
+    for (const p of air.planes) {
+      if (p.gone) continue;
+      const a = p.audio || (p.audio = { id: p.id, type: p.type, pos: p.pos, vel: p.vel });
+      a.throttle = p.alive ? 0.8 : 0.4;
+      a.dive = Math.max(0, -p.fwd.y);
+      a.burning = !p.alive;
+      audioPlanes.push(a);
+    }
+    audio.setAircraft(audioPlanes);
     audio.update(rawDt, camera, {
-      day: day * (1 - weather.state.storm),
-      night: atmosphere.night,
-      rain: weather.state.rain * (underwater ? 0.2 : 1),
       wind: weather.state.wind,
-      water: Math.max(shore, player.swimming ? 1 : 0),
-      underwater,
-      dread: playing ? creatures.dread : 0,
-    }, monument.crystalPos);
+      rain: weather.state.rain,
+      combat: director.combat,
+      raid: director.state === 'raid',
+      shipSpeed: fleet.own.speed,
+      deafen: mode === 'gun' ? gunner.deafen : 0,
+      drive: mode === 'gun' && gunner.active ? gunner.driveLoad : -1,
+      zoom,
+    });
 
     // dynamic resolution: keep frame time near 60fps
     resTimer -= rawDt;
@@ -734,37 +766,55 @@ async function init() {
     }
 
     // HUD
-    if (playing) {
-      const markers = quest.targets().map((w) => ({ pos: w.pos, color: `#${w.color.getHexString()}`, kind: 'wisp', showDist: false }));
-      if (q.nearest && markers.length) {
-        const m = markers.find((mk) => mk.pos === q.nearest.group.position);
-        if (m) m.showDist = true;
+    if (mode === 'gun' && gunner.active) {
+      const assist = params.leadSight === 'On' || (params.leadSight === 'Auto' && DIFFICULTY[params.difficulty].assist);
+      hud.updateSight(camera, air.planes, gunner, assist, params.brackets);
+      hud.setGun(gunner.station, gunner.blocked && gunner.firing);
+      if (mapOpen) shipMap.update();
+      const markers = [];
+      for (const g of air.groups) {
+        const p = g.planes.find((q) => q.alive);
+        if (p) markers.push({ pos: p.pos, kind: 'enemy', label: `${g.planes.filter((q) => q.alive).length} ${p.def.label}` });
       }
-      markers.push({ pos: monument.crystalPos, kind: 'home', showDist: quest.collected === quest.total && !game.activated });
+      if (!fleet.carrier.sunk) markers.push({ pos: fleet.carrier.position, kind: 'friend', label: 'CV' });
       hud.updateCompass(camera, markers);
+    }
+    shipTimer -= rawDt;
+    if (shipTimer <= 0 && inGame) {
+      shipTimer = 0.3;
+      hud.setShips(
+        fleet.ships.map((s) => ({
+          name: s.name,
+          hp: s.hp,
+          maxHp: s.maxHp,
+          sunk: s.sunk,
+          fires: s.fires.length,
+          tag: s === fleet.own ? 'own' : s === fleet.carrier ? 'carrier' : s.cls,
+        }))
+      );
     }
     hudTimer -= rawDt;
     if (hudTimer <= 0 && document.body.classList.contains('debug')) {
       hudTimer = 0.25;
       const i = renderer.info;
-      const p = camera.position;
+      const c = fx.counts;
       hud.debug(
         `fps        ${(1000 / frameAvg).toFixed(0)} (${frameAvg.toFixed(1)} ms)\n` +
-          `mode       ${player.mode}\n` +
+          `mode       ${mode}${paused ? ' (paused)' : ''}  ${director.state} raid ${director.raid + 1}\n` +
           `draw calls ${i.render.calls}\n` +
           `triangles  ${(i.render.triangles / 1e6).toFixed(2)}M\n` +
-          `grass      ${(grass.count / 1000).toFixed(0)}k blades\n` +
-          `lake       ${lakeLife.fishActive} fish, ${(lakeLife.kelpTotal * lakeLife.kelpDensity / 1000).toFixed(0)}k plants\n` +
           `resolution ${Math.round(innerWidth * renderer.getPixelRatio())}x${Math.round(innerHeight * renderer.getPixelRatio())} (${Math.round(resScale * 100)}%)\n` +
-          `weather    ${params.weather}  wet ${weather.wetness.toFixed(2)}\n` +
-          `creatures  ${creatures.shadeCount} shades, ${creatures.hares.filter((e) => !e.asleep).length} hares awake, ${orbs.count} orbs\n` +
-          `ecs        ${ecs.entities.length} entities, light ${(game.light * 100).toFixed(0)}%\n` +
-          `position   ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}`
+          `aircraft   ${air.aliveCount} flying, ${air.planes.length} total\n` +
+          `shells     ${ballistics.n}  bombs ${ordnance.bombs.length}  torpedoes ${ordnance.torpedoes.length}\n` +
+          `particles  ${c.smoke} smoke, ${c.glow} glow, ${c.debris} debris\n` +
+          `own ship   ${fleet.own.hp.toFixed(0)}/${fleet.own.maxHp} hp, ${fleet.own.fires.length} fires\n` +
+          `sun        ${params.elevation.toFixed(1)} deg  weather ${params.weather}`
       );
     }
-  });
+  };
+  renderer.setAnimationLoop(() => frame());
 
-  window.__maxgfx = { renderer, scene, camera, params, player, atmosphere, post, quest, weather, audio, game, hud, skyfx, terrainShadow, monument, underwater: lakeLife, physics, creatures, orbs, ecs, systems: { queries, motorSystem, syncSystem, collectLights } };
+  window.__maxgfx = { renderer, scene, camera, params, atmosphere, ocean, islands, clouds, fx, ballistics, ordnance, fleet, air, gunner, director, cinematic, weather, audio, hud, post, get mode() { return mode; }, setMode, frame };
 }
 
 init().catch((err) => {

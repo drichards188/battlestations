@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MaxGFX: Valley of Wisps</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Cpath d=%22M16 2l6 14-6 14-6-14z%22 fill=%22%238fe9ff%22/%3E%3C/svg%3E" />
+    <title>MaxGFX: Battle Stations</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2212%22 fill=%22none%22 stroke=%22%23ffb45a%22 stroke-width=%223%22/%3E%3Cpath d=%22M16 2v28M2 16h28%22 stroke=%22%23ffb45a%22 stroke-width=%222%22/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body class="title cinematic">
@@ -16,22 +16,32 @@
     <div id="title-screen">
       <div class="brand">
         <h1>MAX<span>GFX</span></h1>
-        <p class="sub">Valley of Wisps</p>
+        <p class="sub">Battle Stations · Western Pacific, 1944</p>
+        <p class="blurb">You crew the anti-aircraft guns of USS Alabama (BB-60), screening the fast carriers in June 1944. Japanese strikes are inbound. Keep them off the task group.</p>
       </div>
       <div class="loader">
         <div id="load-bar"><div id="load-bar-fill"></div></div>
-        <p id="status">Generating world…</p>
+        <p id="status">Generating the task group…</p>
       </div>
-      <button id="play" disabled>Begin</button>
+      <div id="difficulty">
+        <button data-d="Recruit">Recruit</button>
+        <button data-d="Gunner" class="on">Gunner</button>
+        <button data-d="Veteran">Veteran</button>
+      </div>
+      <div class="actions">
+        <button id="play" disabled>Man your station</button>
+        <button id="restart">New battle</button>
+      </div>
       <ul class="keys">
-        <li><kbd>WASD</kbd> move</li>
-        <li><kbd>Shift</kbd> sprint</li>
-        <li><kbd>Space</kbd> jump / swim up</li>
-        <li><kbd>Q</kbd> dive</li>
-        <li><kbd>Click</kbd> / <kbd>E</kbd> throw light</li>
-        <li><kbd>F</kbd> fly</li>
+        <li><kbd>Mouse</kbd> train &amp; elevate</li>
+        <li><kbd>LMB</kbd> fire</li>
+        <li><kbd>RMB</kbd> zoom sight</li>
+        <li>hold <kbd>Ctrl</kbd> ship plan: click a mount to man it</li>
+        <li><kbd>1</kbd>-<kbd>9</kbd> / <kbd>Q</kbd> <kbd>E</kbd> change station</li>
+        <li><kbd>R</kbd> reload (20mm)</li>
+        <li><kbd>X</kbd> pointer's sight</li>
         <li><kbd>P</kbd> photo mode</li>
-        <li><kbd>C</kbd> cinematic</li>
+        <li><kbd>C</kbd> title camera</li>
         <li><kbd>M</kbd> mute</li>
         <li><kbd>H</kbd> hide UI</li>
         <li><kbd>F3</kbd> stats</li>
@@ -42,20 +52,63 @@
       <div id="compass">
         <div id="compass-strip"></div>
         <div class="compass-center"></div>
+        <div id="heading">000</div>
       </div>
       <div id="objective">
-        <div id="obj-title">The Valley of Wisps</div>
+        <div id="obj-title">General quarters</div>
         <div id="obj-text"></div>
+        <div id="obj-count"></div>
       </div>
+      <div id="score-box"><span>Score</span><b id="score">0</b></div>
+      <div id="radio"></div>
       <div id="toast"><div id="toast-main"></div><div id="toast-sub"></div></div>
       <div id="hint"></div>
-      <div id="crosshair"></div>
-      <div id="vitals">
-        <div id="light-bar"><div id="light-fill"></div></div>
-        <div id="orb-pips"></div>
+      <div id="ships"></div>
+      <div id="gun">
+        <div id="station"><span id="station-index">1/4</span><span id="station-name"></span></div>
+        <div id="feed"></div>
+        <div id="supply"></div>
+        <div id="heat"><div id="heat-fill"></div></div>
+        <div id="ammo"></div>
+        <div id="gun-status"></div>
+      </div>
+      <div id="brackets"></div>
+      <div id="sight">
+        <svg viewBox="-100 -100 200 200">
+          <circle r="92" class="ring" />
+          <circle r="46" class="ring thin" />
+          <path d="M-92 0h30M62 0h30M0 -92v30M0 62v30" class="ring" />
+          <path d="M-12 0h7M5 0h7M0 -12v7M0 5v7" class="center" />
+          <circle r="1.6" class="dot" />
+        </svg>
+      </div>
+      <div id="lead"><i></i></div>
+      <div id="command"></div>
+      <div id="hitmark"></div>
+      <div id="kill"><div class="k-main"></div><div class="k-pts"></div></div>
+    </div>
+    <div id="dmg"></div>
+
+    <div id="shipmap">
+      <div class="sheet">
+        <div class="head"><span class="tag">USS Alabama · BB-60 · battle stations</span><span class="tabs"><button data-f="all">All</button><button data-f="5">5"/38</button><button data-f="40">40mm</button><button data-f="20">20mm</button></span><span class="cur"></span></div>
+        <div class="plan"><img alt="" /><div class="marks"></div><span class="dir">bow ›</span></div>
+        <div class="foot">Click a mount to take it over · let go of <kbd>Ctrl</kbd> to return to your gun · shaded: arc of fire · 20mm numbers are ours</div>
       </div>
     </div>
-    <div id="dread"></div>
+
+    <div id="end">
+      <div class="panel">
+        <div class="tag">After-action report</div>
+        <h2 id="end-title"></h2>
+        <p id="end-sub"></p>
+        <div id="end-stats"></div>
+        <div class="buttons">
+          <button id="end-continue">Keep fighting</button>
+          <button id="end-restart">New battle</button>
+        </div>
+      </div>
+    </div>
 
     <div id="photo-ui">
       <span>PHOTO MODE</span>

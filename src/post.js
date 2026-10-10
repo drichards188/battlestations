@@ -366,12 +366,13 @@ const LensShader = {
 
 // ---------------------------------------------------------------- grade
 export const GRADES = {
+  Kodachrome: { saturation: 1.18, contrast: 1.1, shadow: [0.95, 0.99, 1.06], highlight: [1.08, 1.01, 0.9] },
   Natural: { saturation: 1.1, contrast: 1.05, shadow: [0.97, 1.0, 1.04], highlight: [1.03, 1.0, 0.96] },
   Cinematic: { saturation: 1.05, contrast: 1.12, shadow: [0.88, 1.0, 1.12], highlight: [1.1, 1.0, 0.88] },
   Warm: { saturation: 1.15, contrast: 1.06, shadow: [1.02, 0.98, 0.92], highlight: [1.1, 1.02, 0.86] },
   Cool: { saturation: 0.95, contrast: 1.04, shadow: [0.9, 0.98, 1.12], highlight: [0.96, 1.0, 1.06] },
   Vivid: { saturation: 1.4, contrast: 1.1, shadow: [0.98, 1.0, 1.02], highlight: [1.02, 1.0, 0.98] },
-  Noir: { saturation: 0, contrast: 1.35, shadow: [1, 1, 1], highlight: [1, 1, 1] },
+  Newsreel: { saturation: 0, contrast: 1.3, shadow: [0.98, 0.98, 1], highlight: [1.04, 1.02, 0.97] },
 };
 
 const GradeShader = {

@@ -12,9 +12,6 @@ export const globalUniforms = {
   // world lighting shared by every lit material
   uSunDirW: { value: new THREE.Vector3(0, 1, 0) }, // direction of the active key light (sun or moon)
   uSunColorN: { value: new THREE.Color(1, 1, 1) }, // key light color, ~1 at full daylight
-  uTerrainShadowTex: { value: null },
-  uTerrainShadowOn: { value: 0 },
-  uTerrainSize: { value: 1600 },
   uCloudShadow: { value: 0.45 },
   uCloudCoverage: { value: 0.38 },
   uCloudOffset: { value: new THREE.Vector2() },
@@ -75,9 +72,6 @@ THREE.ShaderChunk.fog_pars_fragment = /* glsl */ `
   uniform float fogHeightFalloff;
   uniform float fogBaseHeight;
 
-  uniform sampler2D uTerrainShadowTex;
-  uniform float uTerrainShadowOn;
-  uniform float uTerrainSize;
   uniform float uCloudShadow;
   uniform float uCloudCoverage;
   uniform vec2 uCloudOffset;
@@ -99,17 +93,9 @@ THREE.ShaderChunk.fog_pars_fragment = /* glsl */ `
   }
 
   // Large-scale shadowing that the (camera-local) shadow map can't provide:
-  // terrain self-shadowing from a raymarched occlusion-height map, and
   // moving cloud shadows projected along the key light direction.
   float worldShadowFactor(vec3 wp) {
     float s = 1.0;
-    if (uTerrainShadowOn > 0.5) {
-      vec2 uv = wp.xz / uTerrainSize + 0.5;
-      if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) {
-        vec2 occ = texture2D(uTerrainShadowTex, uv).rg; // r: height needed to see the light, g: penumbra
-        s = smoothstep(occ.r - occ.g, occ.r + 0.2, wp.y + 0.35);
-      }
-    }
     if (uCloudShadow > 0.0) {
       vec3 L = uSunDirW;
       vec2 cp = wp.xz + L.xz / max(L.y, 0.2) * (700.0 - wp.y);

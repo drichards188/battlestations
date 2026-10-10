@@ -48,8 +48,8 @@ export class Atmosphere {
     this.uniforms = this.sky.material.uniforms;
     this.uniforms.turbidity.value = 4.5;
     this.uniforms.rayleigh.value = 1.6;
-    this.uniforms.mieCoefficient.value = 0.004;
-    this.uniforms.mieDirectionalG.value = 0.82;
+    this.uniforms.mieCoefficient.value = 0.0028;
+    this.uniforms.mieDirectionalG.value = 0.78;
     this.uniforms.cloudCoverage.value = 0.38;
     this.uniforms.cloudDensity.value = 0.5;
     this.uniforms.cloudElevation.value = 0.55;

@@ -1,8 +1,6 @@
-# MaxGFX: Valley of Wisps
+# MaxGFX: Battle Stations
 
-A three.js (WebGL2) game that pushes real-time rendering toward a modern AAA look. Everything is procedural: terrain, trees, creatures, textures, sound and music are all generated at load, so there are no asset downloads.
-
-Beyond three.js it uses [Rapier](https://rapier.rs) for physics, [Yuka](https://mugen87.github.io/yuka/) for creature AI and [miniplex](https://github.com/hmans/miniplex) as a small entity/component registry.
+A three.js (WebGL2) game that pushes real-time rendering toward a modern AAA look. You crew the anti-aircraft guns of USS Alabama (BB-60), screening a fast carrier task group in the Western Pacific in June 1944, while Japanese strikes come in: Val dive bombers, Kate and Betty torpedo bombers, strafing Zeros and kamikazes. Everything is procedural: the ocean, the ships, the aircraft, the guns, textures, sound and music are all generated at load, so there are no asset downloads.
 
 ```bash
 npm install
@@ -12,86 +10,79 @@ npm run build    # production bundle in dist/
 
 ## Playing
 
-A cinematic camera tour plays behind the title screen. Click **Begin** to drop into the valley. Seven wisps are scattered around it. Follow their light pillars and the compass markers, and walk into each one to gather it. Each wisp flies back to orbit the crystal, and returning all seven awakens the valley.
+A cinematic camera tours the task group behind the title screen while the fleet fights off a practice raid. Pick a difficulty and click **Man your station**.
 
-**Shades** come out at night, in storms, and once you have gathered two wisps. They prowl toward you, hunt you when you come within about 30 m, and lunge to drain your **light** (the bar at the bottom of the screen). Light comes back slowly on its own and quickly inside the stone circle, which shades cannot enter. If it runs out, the dark takes you back to the crystal. Throw **light orbs** (click or `E`, three charges that recharge) to drive them off: shades won't enter an orb's glow, and a direct hit banishes one. Sprinting outruns them. Awakening the valley banishes them for good.
+You start on the starboard quad 40mm Bofors amidships. Raids are called out by radar with their bearing, range and altitude, and show up as red markers on the compass. Train and elevate with the mouse: you are working the pointer's and trainer's handwheels, and the mount's electro-hydraulic power drives follow at their real speed (26 degrees a second in train, 24 in elevation for the Mk 2 quad), accelerating and braking no harder than the drive's gear allows and a moment late, so the mount is heavy and you can't whip it round; a small circle shows where you are commanding it to point, and it can't run more than about 30 degrees ahead of the guns. Hold the left button to fire. The rounds take seconds to reach a target, so lead it: on Recruit and Gunner the **lead computing sight** puts a diamond where you need to aim at the aircraft nearest your bore line. The quad fires at its real rate, each gun cycling about every half second; the guns of each twin slide alternate through their delay gear, so one gun of each pair fires at the same moment. Barrels heat up under long bursts and lock out until they cool. `X` switches between the centre view and the pointer's seat behind his ring sight. The guns stop firing (**firing cutout**) rather than shoot through your own superstructure.
 
-Herds of **hares** graze in the meadows. They scatter when you come close (sooner when you sprint) or when a shade is near, and burrow at night.
+The Bofors' ammunition is live and works as the manuals describe it (OP 820, TM 9-252, OD 4391). Each gun's automatic loader is a pair of curved guides above the rammer tray holding seven rounds, noses forward, fanning toward the muzzle, with an eighth on the tray. Each shot, the feed pawls force the column down one round, the star wheels turn a quarter turn and the lowest round drops onto the tray; the empty case goes out of the breech into the deflector and down through the carriage to the deck. Loaders drop 4-round clips into the feed lips; each clip rides down with its rounds until it is cammed off two rounds from the bottom and thrown out through the side of the slide. With two rounds left the loader catch stops the gun, and it fires again by itself the moment a clip goes in. The loaders aren't machines: they tire, a crooked clip has to be rocked into the lips, and now and then one jams and has to be cleared with the tools while that gun runs dry. Behind them, second loaders work out of the ready racks, passers restock the racks from the lockers and the hoist refills the lockers; hold the trigger long enough and you outrun them (the HUD shows each gun's tray round, its seven in the guides and the loader's next clip, plus the ready supply).
+
+Every anti-aircraft gun aboard Alabama can be manned: her ten twin 5"/38 mounts, twelve quad 40mm Bofors and thirty-three single 20mm Oerlikons. Hold `Ctrl` for the ship's plan: Alabama seen from above with every mount marked, pointing the way it is trained; hover one to see its arc of fire, use the tabs to pick out the 5", 40mm or 20mm, and click a mount to take it over (the battle doesn't stop while the plan is up). Let go of `Ctrl` to go back to your gun. Whatever you aren't on is crewed by the AI, like every gun in the fleet. You start on Mount 47, the starboard quad on the 02 level. The 5" mounts are enclosed, slow to train (25 degrees a second, 15 in elevation), each gun hand-loaded from the hoists and firing as its breech closes, about 15 to 20 rounds a minute a gun, with VT-fuzed shells that burst on proximity; `X` moves you from the mount captain's hatch to the pointer's telescope window. In 1944 they were numbered 1 to 10 (Alabama's war history records "5-inch mount no. 9 accidentally fired into mount no. 5"). The 40mm quads carry the numbers 41 to 52 as we have them, and the 20mm numbers are our own. The Oerlikons are fast and light, with 60-round drums (`R` to change drums); Alabama never carried the forecastle 40mms planned for her, they were too wet. `1`-`9`, `Q` and `E` also change mounts.
+
+Six raids escalate through the afternoon into golden hour: dive bombers, a torpedo attack, a coordinated strike from two sides, the special attack unit (kamikazes), land-based Bettys, then everything at once. Dive bombers push over from about 2 km and release around 450 m. Torpedo planes drop to wave-top height on a ship's beam, drop about a kilometre out, then break away or roar across the formation; torpedo tracks show as white wakes and ships turn to comb them. Zeros make strafing runs and pull up over the deck. Kamikazes weave in and keep coming even when they are on fire. Bombs and kamikazes start fires; damage control parties restore some hull integrity between raids. Lose your own ship or the carrier and the battle is over. Survive all six for the after-action report, then keep fighting in an endless mode if you like.
 
 | Key | Action |
 |---|---|
-| `W A S D` | move |
-| `Shift` | sprint |
-| `Space` | jump, swim up |
-| `Q` | dive (while swimming), descend (fly / photo) |
-| `Click` / `E` | throw a light orb |
-| `F` | toggle fly mode |
+| Mouse | train and elevate the gun |
+| Left button | fire |
+| Right button | zoom the sight |
+| hold `Ctrl` | the ship's plan: click a mount to man it |
+| `1`-`9`, `Q` / `E` | change mount |
+| `R` | change drums (20mm) |
+| `X` | centre view or the pointer's sight |
+| `C` | watch the battle from the cinematic camera (and back) |
 | `P` | photo mode (freezes time, free camera, depth of field) |
 | `K` | capture a PNG screenshot (photo mode) |
-| `C` | cinematic camera / title screen |
 | `V` | cycle weather: Clear, Cloudy, Rain, Storm |
-| `T` | toggle the day/night cycle |
 | `M` | mute |
 | `H` | hide all UI |
-| `F3` | FPS, draw calls, triangles, resolution |
-| `Esc` | release the mouse (pause, settings panel) |
+| `F3` | FPS, draw calls, triangles, aircraft, shells, particles |
+| `Esc` | release the mouse (pauses the battle, settings panel) |
 
 ## Rendering
 
 | Area | Technique |
 |---|---|
-| Terrain | 1.6 km heightfield (fbm + ridged noise) with a per-pixel splat shader (grass, dirt, sand, rock strata, snow, wet shoreline), rain puddles that turn mirror-flat, and animated caustics on the lake bed |
-| Lake bed | Reefs of ridged rock, a drop-off into a deep basin and a sinuous trench, sculpted only below the waterline. Underwater splat layers (rippled sand with analytic ripple normals, gravel, silt, an algae film where the light reaches), water-worn boulders, and lighting that dims and shifts to teal with depth |
-| Lake life | Chunked GPU-instanced kelp and eelgrass forests swaying in a slow current, schools of minnows, perch and carp driven by a boids simulation (one draw call, tail beat in the vertex shader, they scatter from the swimmer), reed beds and lily pads along the shore, and, when diving, plankton, bubbles and the underside of the surface with Snell's window and sun glints |
-| World shadows | GPU-baked "occlusion height" map raymarched through the heightmap toward the sun, so mountains cast soft shadows across the whole valley, beyond the reach of the shadow map. Moving cloud shadows are projected along the light direction |
-| Grass | Up to 1M GPU-instanced blades in a tile that wraps around the camera. Terrain snapping, masking, layered wind gusts, player push-away and backlit translucency all run in the shaders |
-| Forest | Leaf-card broadleaf trees and needle-card pines built from canvas-painted atlases, with volumetric canopy normals, wind sway, per-card flutter, sun translucency and mip-aware alpha so canopies don't thin out with distance. Instanced and chunked for frustum culling |
-| Sky | Physical Rayleigh/Mie sky with clouds, stars, a Milky Way band, a moon, storm overcast and lightning flashes, plus aurora curtains at night |
-| Lighting | Sun/moon directional light with texel-snapped 4096² shadows that follow the view, IBL re-baked from the live sky, and a time-of-day cycle |
-| Weather | Smooth transitions between Clear, Cloudy, Rain and Storm: rain streaks, surfaces that darken and turn glossy as they get wet then dry out, rain ripples on the lake, stronger wind and waves, and lightning bolts with delayed thunder |
-| Water | Planar HDR reflections, depth-based absorption, see-through shallows, shore foam, HDR sun glints, and an underwater view with absorption fog and light shafts |
-| Materials | Glass crystal with transmission, dispersion and iridescence; chrome, gold, clear-coat paint, velvet sheen, pearl iridescence, anisotropic copper |
-| Life | Flocks of birds, butterflies, fireflies at night, dust motes in the sunlight, fish in the lake |
-| Creatures | Shades (hooded wraiths with billowing, tattered robes, a dissolve-in effect, glowing eyes and a rim glow that flares when they lunge or burn in light) and hopping hares, both GPU-instanced. Each is a Yuka vehicle with a state machine and steering behaviors (wander, pursuit, flee, flocking, arrive, plus custom water, home-range and sanctuary avoidance), moved by a Rapier character controller that slides along trees, rocks and slopes |
-| Physics | Rapier world with the terrain as an exact heightfield (it matches the rendered triangles), trees and standing stones as cylinders, rocks and boulders as spheres. Light orbs bounce down slopes and float on the lake |
-| Post | Single scene pass with a shared depth buffer, GTAO from that depth, eye-adaptation auto exposure (GPU luminance reduction), bokeh depth of field with autofocus, bloom, god rays, occlusion-aware lens flare, ACES/AgX tone mapping, SMAA, color grade presets, contrast-adaptive sharpening, vignette and grain |
+| Ocean | Gerstner wave spectrum (a long swell plus a spread wind sea) evaluated identically on the GPU and the CPU, so ships ride the same waves you see. A radial grid that follows the camera out to 24 km with earth curvature, so distant hulls sink below the horizon. Per-pixel wave normals with footprint-based filtering that moves unresolved slope into roughness (no glint aliasing), rotated ripple layers, a physically based water material reflecting the live sky, light through thin wave crests, whitecaps, and turquoise lagoons around the islands |
+| Wakes | A 5 km world-space foam map around the camera (ping-pong render targets, max-blended stamps, diffusion and decay) that ships, torpedoes, splashes and crashes write into: turbulent stern wakes, aerated turquoise water, torpedo tracks. Bow waves, hull churn and Kelvin wake arms are computed per ship in the ocean shader |
+| Ships | Procedural South Dakota class battleships built to their mid-1944 fit: USS Alabama (ten twin 5"/38s, twelve quad Bofors, Measure 21 overall Navy Blue with blue-stained decks), USS South Dakota with her flagship conning tower and eight 5" mounts, and USS Indiana in Measure 32 dazzle; an Essex class carrier with Hellcats spotted on deck, Cleveland class cruisers and Fletcher class destroyers: lofted hulls with sheer and flare, superstructures, main battery turrets, directors, radars, railings, teak and steel decks, Measure 21/22 paint and Measure 32 dazzle camouflage, weathering and rust. Ships keep formation stations, zig-zag, heel in turns, pitch, roll and heave on the waves, list after torpedo hits, burn and sink |
+| Guns | Every 5"/38, 40mm and 20mm mount in the fleet is instanced, crewed by posed sailors and individually aimed, firing at real rates: about 18 rounds a minute per 5"/38 gun, 120 per Bofors barrel, 450 per Oerlikon with drum changes. Your own quad Bofors and twin Oerlikon are detailed models with recoiling barrels, loader clips and drum magazines |
+| Aircraft | Zero, Val, Kate, Betty and Hellcat built from parametric pieces, instanced per type with procedural liveries (hinomaru, IFF strips, US star-and-bar), spinning props and blur discs, scorch damage and hit flashes |
+| Combat effects | Thousands of simulated shells with drag and gravity drawn as HDR tracers, proximity-fuzed 5" flak bursts that leave black puffs, lit and depth-sorted smoke (flak, burning aircraft trails, ship fires that tower downwind), water columns from bombs and shells, fireballs, sparks, debris and a fixed pool of point lights for blasts |
+| Sky | Physical sky with stars and moon, trade-wind cumulus built from lit, sorted billboard clusters, volcanic islands on the horizon, sun and moon light, IBL re-baked from the live sky, a time of day that slides toward evening across the battle |
+| Post | Single scene pass with a shared depth buffer, GTAO, eye-adaptation auto exposure, bokeh depth of field (cinematic and photo), bloom, god rays, lens flare, ACES/AgX tone mapping, SMAA, color grades (Kodachrome, Newsreel and more), sharpening, vignette and grain |
 | Performance | Quality presets (Low to Ultra) and dynamic resolution that holds ~60 FPS |
 
 ## Audio
 
-Everything is synthesized with WebAudio at runtime:
-
-- **Ambience:** wind that follows gusts and altitude, rain, water lapping at the shore, birdsong placed in 3D around you by day, crickets at night.
-- **World sounds:** a positional hum from the crystal, footsteps that change by surface (grass, stone, water), landings and splashes, thunder delayed by the strike's distance, and muffled sound underwater.
-- **Music:** a generative ambient score, plus chimes on pickups and a chord swell at the finale.
-- **Creatures:** a low beating drone and whispers that rise as shades close in, their blows, banishing chimes, orb throws and bounces.
+Everything is synthesized with WebAudio at runtime: your gun's thump and auto-loader clatter with brass casings on the deck, positional 5", 40mm and 20mm fire across the fleet delayed by the speed of sound, flak cracks and distant crumps, radial engines with Doppler for the nearest aircraft and a drone for the rest of the raid, falling bomb whistles, explosions, water columns, torpedo hits, bullet strikes on steel, ringing ears after a near miss, the general quarters gong and radio squelch, ocean, wind and machinery ambience, and a generative score that builds with the fighting.
 
 ## Layout
 
 ```
 src/
-  main.js          renderer, quality presets, GUI, game flow, main loop
-  shaderlib.js     shared uniforms, GLSL noise, height fog, world shadows, wetness
+  main.js          renderer, quality presets, GUI, game flow, event wiring, main loop
+  shaderlib.js     shared uniforms, GLSL noise, height fog, cloud shadows, wetness
   noise.js         CPU noise, seeded RNG, tileable normal-map generator
-  terrain.js       heightfield, splat shader, caustics, exact height queries
-  terrainShadow.js GPU terrain occlusion-height bake
   atmosphere.js    sky, stars, moon, sun/moon light, IBL bake, async fog probe
   weather.js       weather states, rain, lightning
-  skyfx.js         aurora, monument beam, shockwave
-  water.js         custom water shading on top of three's mirror Water
-  underwater.js    kelp forests, fish schools, lake-bed boulders, reeds, lily pads, plankton, surface from below
-  grass.js         GPU grass field
-  vegetation.js    foliage atlases, tree and rock generation, scattering
-  monument.js      stone circle, crystal, PBR showcase
-  particles.js     fireflies and dust motes
-  fauna.js         birds and butterflies
-  quest.js         wisps, pickup bursts, delivery
-  physics.js       Rapier world: terrain heightfield, static props, character controllers, orb bodies
-  ecs.js           miniplex entity registry, queries, motor and sync systems
-  creatures.js     shades and hares: Yuka steering and state machines, instanced visuals
-  orbs.js          throwable light orbs, buoyancy, pooled point lights
+  ocean.js         Gerstner ocean (GPU and CPU), water material, foam map, wakes
+  islands.js       volcanic islands and lagoon shallows
+  clouds.js        cumulus billboard clusters
+  fleet.js         ships: formation, motion, damage, fires, sinking; AI gun crews
+  air.js           aircraft: instanced rendering, formations, attack AI, damage
+  ordnance.js      bombs and torpedoes
+  ballistics.js    shells, tracers, hit detection, lead computation
+  gunner.js        the player's gun stations, power drives, aiming, firing, camera
+  feed.js          the quad Bofors' automatic loaders, clips, loaders, racks, spent brass
+  shipmap.js       the ship's plan (hold Ctrl) for changing mounts
+  director.js      raids, callouts, scoring, difficulty, win and loss
+  cinematic.js     title camera tour, photo-mode camera
+  fx.js            smoke, fire, flashes, sparks, spray, debris, blast lights
   audio.js         procedural audio engine and music
-  hud.js           title screen, compass, objectives, toasts
+  hud.js           sight, brackets, radio log, compass, status, end screen
   post.js          post-processing chain and custom passes
-  player.js        walk/swim/fly controller, cinematic shots, photo camera
+  models/
+    ships.js       procedural ship builder (bb, cv, cl, dd)
+    aircraft.js    procedural aircraft, liveries, bombs and torpedoes
+    guns.js        instanced AI mounts and the detailed player guns
 ```
