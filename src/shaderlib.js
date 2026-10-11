@@ -18,7 +18,14 @@ export const globalUniforms = {
   uWetness: { value: 0 },
   uWindStrength: { value: 1 },
   uWaterLevel: { value: 0 },
+
+  // parachute flares: up to MAX_FLARE_LIGHTS analytic point lights evaluated in every lit material
+  // (and the cloud billboards). Fixed-size arrays, so the count changing never recompiles a shader.
+  uFlarePos: { value: Array.from({ length: 4 }, () => new THREE.Vector3()) }, // world position
+  uFlareCol: { value: Array.from({ length: 4 }, () => new THREE.Vector3()) }, // colour times intensity (W/sr-ish)
+  uFlareCount: { value: 0 },
 };
+export const MAX_FLARE_LIGHTS = 4;
 
 // Hash / value noise / fbm usable from any shader.
 export const noiseGLSL = /* glsl */ `
@@ -78,6 +85,19 @@ THREE.ShaderChunk.fog_pars_fragment = /* glsl */ `
   uniform float uWetness;
   uniform vec3 uSunDirW;
   uniform vec3 uSunColorN;
+  uniform vec3 uFlarePos[4];
+  uniform vec3 uFlareCol[4];
+  uniform int uFlareCount;
+
+  // irradiance from flare i at world point wp (inverse square, faded out past ~4 km)
+  vec3 flareIrradiance(int i, vec3 wp, out vec3 dirW) {
+    vec3 d = uFlarePos[i] - wp;
+    float d2 = dot(d, d);
+    dirW = d * inversesqrt(max(d2, 1.0));
+    float fade = 1.0 - smoothstep(9.0e6, 1.6e7, d2);
+    // softened inside ~400 m so a flare drifting close doesn't burn a hot spot into the deck
+    return uFlareCol[i] / (d2 + 1.6e5) * fade;
+  }
 
   float csHash(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -139,6 +159,29 @@ THREE.ShaderChunk.lights_fragment_end = lightsEnd + /* glsl */ `
     reflectedLight.directDiffuse *= wsf;
     reflectedLight.directSpecular *= wsf;
   }
+  #if defined( RE_Direct )
+  // parachute flares, through the material's own BRDF (no shadows)
+  for (int fi = 0; fi < 4; fi++) {
+    if (fi >= uFlareCount) break;
+    vec3 flDirW;
+    vec3 flIrr = flareIrradiance(fi, vFogWorldPos, flDirW);
+    IncidentLight flareLight;
+    flareLight.direction = normalize((viewMatrix * vec4(flDirW, 0.0)).xyz);
+    flareLight.color = flIrr;
+    flareLight.visible = true;
+    #ifdef FLARE_DIFFUSE
+    vec3 flDiffuse0 = reflectedLight.directDiffuse;
+    vec3 flSpecular0 = reflectedLight.directSpecular;
+    #endif
+    RE_Direct( flareLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+    #ifdef FLARE_DIFFUSE
+    // a material can take less of the flare (the ocean's body colour is tuned for sunlight, and a
+    // point light's glitter on calm water would bloom across the whole screen)
+    reflectedLight.directDiffuse = mix(flDiffuse0, reflectedLight.directDiffuse, FLARE_DIFFUSE);
+    reflectedLight.directSpecular = mix(flSpecular0, reflectedLight.directSpecular, FLARE_SPECULAR);
+    #endif
+  }
+  #endif
 #endif
 `;
 

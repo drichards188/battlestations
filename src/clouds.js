@@ -107,6 +107,13 @@ export class Clouds {
           vec3 lit = uSun * (0.35 + 0.65 * max(ndl, 0.0)) * (0.55 + 0.45 * hk);
           lit += uSun * pow(max(-uLightView.z, 0.0), 6.0) * (1.0 - dens) * 0.6; // silver lining
           vec3 col = uAmbient * (0.6 + 0.5 * hk) + lit * 0.9;
+          // parachute flares light the cloud bases from below (softened close in: a billboard is
+          // not a volume, and a flare hanging just under one would blow it out)
+          for (int fi = 0; fi < 4; fi++) {
+            if (fi >= uFlareCount) break;
+            vec3 fd = uFlarePos[fi] - vFogWorldPos;
+            col += uFlareCol[fi] / (dot(fd, fd) + 1.0e6) * 0.15 * (1.0 - 0.5 * hk);
+          }
           gl_FragColor = vec4(col, dens * 0.92 * uCover);
           #include <fog_fragment>
         }

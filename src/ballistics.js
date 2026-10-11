@@ -2,10 +2,16 @@ import * as THREE from 'three';
 
 const G = 9.81;
 
-// c: quadratic drag (1/m), v0 muzzle velocity, life: tracer burn / self-destruct time
+// c: quadratic drag (1/m), v0 muzzle velocity, life: time of flight before the round is dropped
+// (or self-destructs), burn: how long its tracer burns (life if unset).
+// 40mm: every round the Navy fired in 1944 was HE-T/SD or HE-I-T/SD, a tracer that destroyed the
+// shell when it burned out at about 5,000 yards (NavWeaps); with this drag that is ~10 s of flight.
+// 20mm: about one round in five was a tracer (US Naval Institute, "Instrumental Oerlikon"); the
+// tracer burned about 3.75 s (NavWeaps) and there was no self-destruct. Which rounds trace is up
+// to whoever fires them (Ballistics.fire's `tracer`).
 export const SHELLS = {
-  '40mm': { id: 0, v0: 881, c: 0.00026, life: 4.4, dmg: 1, tracer: [16, 2.6, 0.7], width: 0.24, tail: 0.035, selfDestruct: true, splash: 0.12 },
-  '20mm': { id: 1, v0: 835, c: 0.00055, life: 3.0, dmg: 0.38, tracer: [16, 5.5, 1.3], width: 0.16, tail: 0.03, selfDestruct: false, splash: 0.06 },
+  '40mm': { id: 0, v0: 881, c: 0.00026, life: 9.8, dmg: 1, tracer: [16, 2.6, 0.7], width: 0.24, tail: 0.035, selfDestruct: true, splash: 0.12 },
+  '20mm': { id: 1, v0: 835, c: 0.00055, life: 6, burn: 3.75, dmg: 0.38, tracer: [16, 5.5, 1.3], width: 0.16, tail: 0.03, selfDestruct: false, splash: 0.06, tracerEvery: 5 },
   '5in': { id: 2, v0: 790, c: 0.00012, life: 14, dmg: 1.6, tracer: null, width: 0, tail: 0, selfDestruct: true, splash: 0.25, vt: 15 },
   mg: { id: 3, v0: 760, c: 0.0011, life: 2.4, dmg: 1, tracer: [7, 9, 5.5], width: 0.12, tail: 0.03, selfDestruct: false, splash: 0.05 },
 };
@@ -96,6 +102,7 @@ export class Ballistics {
     this.px = F(); this.py = F(); this.pz = F();
     this.vx = F(); this.vy = F(); this.vz = F();
     this.age = F(); this.life = F(); this.kind = F(); this.owner = F(); this.dmg = F(); this.fuze = F();
+    this.lit = new Uint8Array(MAX); // 1: this round carries a tracer
     this.stats = { fired: 0, hits: 0 };
 
     const q = new THREE.PlaneGeometry(1, 1);
@@ -162,7 +169,7 @@ export class Ballistics {
   }
 
   /** Fire a shell. dir must be normalised; inherit = velocity of the gun platform. */
-  fire(kindName, pos, dir, inherit, owner, { dmg = 1, fuze = 0, v0 } = {}) {
+  fire(kindName, pos, dir, inherit, owner, { dmg = 1, fuze = 0, v0, tracer = true } = {}) {
     if (this.n >= MAX) return false;
     const k = SHELLS[kindName];
     const i = this.n++;
@@ -176,6 +183,7 @@ export class Ballistics {
     this.kind[i] = k.id;
     this.owner[i] = owner;
     this.dmg[i] = dmg * k.dmg;
+    this.lit[i] = k.tracer && tracer ? 1 : 0;
     if (owner === OWNER.PLAYER) this.stats.fired++;
     return true;
   }
@@ -186,7 +194,7 @@ export class Ballistics {
     this.px[i] = this.px[j]; this.py[i] = this.py[j]; this.pz[i] = this.pz[j];
     this.vx[i] = this.vx[j]; this.vy[i] = this.vy[j]; this.vz[i] = this.vz[j];
     this.age[i] = this.age[j]; this.life[i] = this.life[j]; this.kind[i] = this.kind[j];
-    this.owner[i] = this.owner[j]; this.dmg[i] = this.dmg[j];
+    this.owner[i] = this.owner[j]; this.dmg[i] = this.dmg[j]; this.lit[i] = this.lit[j];
   }
 
   /**
@@ -273,13 +281,16 @@ export class Ballistics {
     let m = 0;
     for (let i = 0; i < this.n; i++) {
       const k = BY_ID[this.kind[i]];
-      if (!k.tracer) continue;
+      if (!this.lit[i]) continue;
+      // the tracer burns out (a 20mm round flies on unseen)
+      const burn = Math.min(k.burn || Infinity, this.life[i]);
+      if (this.age[i] >= burn) continue;
       const o = m * 4;
       A[o] = this.px[i];
       A[o + 1] = this.py[i];
       A[o + 2] = this.pz[i];
       A[o + 3] = k.width;
-      const fade = 1 - Math.pow(Math.min(this.age[i] / this.life[i], 1), 6);
+      const fade = 1 - Math.pow(Math.min(this.age[i] / burn, 1), 6);
       B[o] = k.tracer[0];
       B[o + 1] = k.tracer[1];
       B[o + 2] = k.tracer[2];

@@ -18,8 +18,12 @@ import { Ordnance } from './ordnance.js';
 import { Fleet } from './fleet.js';
 import { Gunner } from './gunner.js';
 import { ShipMap } from './shipmap.js';
-import { Director, DIFFICULTY } from './director.js';
+import { Director, DIFFICULTY, NIGHT_MOON } from './director.js';
 import { Cinematic } from './cinematic.js';
+import { Flares } from './flares.js';
+import { GeneralQuarters } from './gq.js';
+import { buildInterior } from './models/interior.js';
+import { Runners } from './models/runners.js';
 import { buildAircraft, createAircraftMaterial } from './models/aircraft.js';
 
 const QUALITY = {
@@ -96,6 +100,14 @@ async function init() {
   const weather = new Weather(scene, audio);
   const director = new Director({ air, fleet, hud, audio, gunner, ordnance, ballistics });
   const cinematic = new Cinematic(camera, fleet, air);
+  const flares = new Flares(scene, ocean);
+  // the opening: General Quarters below decks and the run up to Mount 47
+  const gq = new GeneralQuarters({ ship: fleet.own, camera, audio, hud });
+  try {
+    gq.setup(buildInterior(fleet.own.model), new Runners(14, { seed: 1944 }));
+  } catch (e) {
+    console.warn('General Quarters opening unavailable:', e);
+  }
 
   patchSceneFog(scene);
 
@@ -107,6 +119,8 @@ async function init() {
     quality: 'High',
     dynamicRes: true,
     difficulty: 'Gunner',
+    timeOfDay: 'Day',
+    gqOpening: true,
     leadSight: 'Auto',
     brackets: true,
     sensitivity: 1,
@@ -187,6 +201,8 @@ async function init() {
   });
   const fPlay = gui.addFolder('Gameplay');
   fPlay.add(params, 'difficulty', Object.keys(DIFFICULTY)).name('Difficulty (next battle)').listen();
+  fPlay.add(params, 'timeOfDay', ['Day', 'Night']).name('Time of day (next battle)').listen().onChange((v) => applyTimeOfDay(v));
+  fPlay.add(params, 'gqOpening').name('General quarters opening');
   fPlay.add(params, 'leadSight', ['Auto', 'On', 'Off']).name('Lead computing sight');
   fPlay.add(params, 'brackets').name('Target brackets');
   fPlay.add(params, 'sensitivity', 0.2, 3, 0.05).name('Mouse sensitivity').onChange((v) => (gunner.sensitivity = v));
@@ -292,6 +308,14 @@ async function init() {
 
   air.events.kill = (p, info) => director.onKill(p, info);
   air.events.escape = (p) => director.onEscape(p);
+  // flare planes: parachute flares and float lights; the director calls them out
+  air.events.flare = (pos, vel, kind) => flares.drop(pos, vel, kind);
+  flares.onIgnite = (pos, kind) => {
+    director.onFlare(pos, kind);
+    audio.flareIgnite?.(pos, kind);
+  };
+  // by night the automatic weapons fire only at what the gunners can see
+  fleet.litAt = (pos) => flares.lightAt(pos);
   air.events.crash = (p, ship, alive) => {
     if (ship) {
       const kami = p.role === 'kamikaze' && (alive || p.phase === 'terminal');
@@ -402,6 +426,35 @@ async function init() {
     })
   );
 
+  // Day or night, picked on the title screen. Out of a battle it switches the title screen's sky and
+  // practice raids at once; during one it applies to the next battle, like the difficulty.
+  const todBtns = [...document.querySelectorAll('#timeofday button')];
+  const blurb = document.querySelector('.brand .blurb');
+  const BLURB = {
+    Day: blurb.textContent,
+    Night: 'After dark the Bettys come in low under parachute flares. You crew the anti-aircraft guns of USS Alabama (BB-60), darkened, screening the fast carriers. Find them by their exhaust and keep them off the task group.',
+  };
+  const setSky = (tod) => {
+    atmosphere.setMoon(tod === 'Night' ? NIGHT_MOON : null);
+    document.body.classList.toggle('night', tod === 'Night');
+  };
+  function applyTimeOfDay(tod) {
+    params.timeOfDay = tod;
+    todBtns.forEach((o) => o.classList.toggle('on', o.dataset.t === tod));
+    blurb.textContent = BLURB[tod];
+    if (inGame || director.night === (tod === 'Night')) return;
+    hud.blackout(true);
+    setTimeout(() => {
+      setSky(tod);
+      director.setTimeOfDay(tod);
+      director.restartAttract();
+      flares.clear();
+      params.elevation = director.startSun;
+      hud.blackout(false);
+    }, 600);
+  }
+  todBtns.forEach((b) => b.addEventListener('click', () => applyTimeOfDay(b.dataset.t)));
+
   const setMode = (m) => {
     mode = m;
     hud.setMode(m);
@@ -414,17 +467,39 @@ async function init() {
     audio.start();
     hud.blackout(true);
     setTimeout(() => {
-      director.start(params.difficulty);
+      setSky(params.timeOfDay);
+      flares.clear();
+      director.start(params.difficulty, params.timeOfDay);
+      params.elevation = director.startSun;
       gunner.newBattle();
       inGame = true;
       document.body.classList.add('in-game');
       paused = false;
       gunner.select(gunner.home);
-      setMode('gun');
       hud.showTitle(false);
       hud.blackout(false);
       playBtn.textContent = 'Resume';
-      hud.hint('Mouse to train and elevate, hold the left button to fire. Hold Ctrl for the ship plan to change mounts.', 7000);
+      const toGuns = () => hud.hint('Mouse to train and elevate, hold the left button to fire. Hold Ctrl for the ship plan to change mounts.', 7000);
+      if (params.gqOpening && gq.available) {
+        // below decks when the alarm goes: the crews aren't at their guns yet, and the first raid
+        // waits until the player is on his
+        fleet.crewsAway = fleet.own;
+        director.gq = true;
+        setMode('gq');
+        // the detailed gun is already in the tub when the player comes up the ladder
+        gunner.sightPreview();
+        gq.start();
+        hud.hint('General quarters! Space to skip to your gun.', 4000);
+        gq.events.done = () => {
+          fleet.crewsAway = null;
+          director.gq = false;
+          if (inGame && mode === 'gq') setMode('gun');
+          toGuns();
+        };
+      } else {
+        setMode('gun');
+        toGuns();
+      }
     }, 900);
   };
 
@@ -636,9 +711,12 @@ async function init() {
       director.update(dt);
       // between raids the passers and the hoist restock the ready racks and lockers
       if (was === 'raid' && director.state !== 'raid') gunner.restock();
+      // each wave opens with Alabama's whistle: one short blast, one long
+      if (was !== 'raid' && director.state === 'raid' && inGame) audio.shipHorn();
     }
     gunner.update(dt, rawDt, { air });
-    if (mode === 'cinematic') cinematic.update(rawDt);
+    if (mode === 'gq') gq.update(dt, () => gunner.sightPreview());
+    else if (mode === 'cinematic') cinematic.update(rawDt);
     else if (mode === 'photo') cinematic.updatePhoto(rawDt);
 
     // camera field of view (the sight zooms)
@@ -672,9 +750,16 @@ async function init() {
     ocean.update(dt, camera, { amp: 1 + weather.state.storm * 1.2, whitecap: 0.22 + weather.state.wind * 0.12, pixelAngle, foam: draw });
     islands.update(camera);
     const lightEnv = { sunDir: atmosphere.lightDir, sunColor: sunColorN, sunIntensity: 6.5, ambient };
-    clouds.update(dt, camera, { ...lightEnv, cover: THREE.MathUtils.clamp(0.55 + weather.state.cover * 0.6, 0, 1) });
+    // by night the boosted moonlight would make the cumulus glow like day: keep them a dim grey
+    clouds.update(dt, camera, { ...lightEnv, sunIntensity: 6.5 * (1 - 0.65 * atmosphere.night), cover: THREE.MathUtils.clamp(0.55 + weather.state.cover * 0.6, 0, 1) });
     fx.wind.set(-5 * weather.state.wind, 0, 2 * weather.state.wind);
-    fx.update(dt, camera, lightEnv);
+    flares.wind.copy(fx.wind);
+    flares.update(dt, camera, pixelAngle);
+    const nightK = atmosphere.night;
+    air.setNight(nightK, pixelAngle);
+    ocean.uniforms.uBiolum.value = nightK * (1 - weather.state.storm * 0.5);
+    director.sunBearing = THREE.MathUtils.radToDeg(Math.atan2(atmosphere.sunDir.x, -atmosphere.sunDir.z));
+    fx.update(dt, camera, { ...lightEnv, night: atmosphere.night });
     weather.update(dt, t, camera, atmosphere);
 
     // parked Hellcats ride the carrier
@@ -694,10 +779,12 @@ async function init() {
     renderer.toneMappingExposure = params.exposure;
     const ex = post.exposure.params;
     ex.auto = params.autoExposure;
-    ex.key = params.exposureKey;
+    // at night the eye adapts much further, and a night scene should still read as dark
+    ex.key = params.exposureKey * (1 - 0.45 * nightK);
+    ex.max = 2 + 5 * (1 - THREE.MathUtils.smoothstep(params.elevation, -6, 3));
     post.gtao.blendIntensity = params.aoIntensity;
     post.bloom.enabled = params.bloom;
-    post.bloom.strength = params.bloomStrength;
+    post.bloom.strength = params.bloomStrength * (1 - 0.45 * nightK); // hundreds of tracers at night exposure
     post.bloom.radius = params.bloomRadius;
     post.bloom.threshold = params.bloomThreshold;
     const lu = post.lens.uniforms;
@@ -705,7 +792,8 @@ async function init() {
     lu.uCA.value = params.chromatic + gunner.trauma * 0.01;
     const gu = post.grade.uniforms;
     gu.uVignette.value = params.vignette + (zoom ? 0.35 : 0);
-    gu.uGrain.value = params.grain;
+    gu.uGrain.value = params.grain * (1 - 0.5 * nightK);
+    gu.uNight.value = nightK;
     gu.uSharpen.value = params.sharpen;
     gu.uFade.value = mode === 'cinematic' ? cinematic.fade : 0;
 
@@ -814,7 +902,7 @@ async function init() {
   };
   renderer.setAnimationLoop(() => frame());
 
-  window.__maxgfx = { renderer, scene, camera, params, atmosphere, ocean, islands, clouds, fx, ballistics, ordnance, fleet, air, gunner, director, cinematic, weather, audio, hud, post, get mode() { return mode; }, setMode, frame };
+  window.__maxgfx = { renderer, scene, camera, params, atmosphere, ocean, islands, clouds, fx, ballistics, ordnance, fleet, air, gunner, director, cinematic, weather, audio, hud, post, flares, gq, get mode() { return mode; }, setMode, frame };
 }
 
 init().catch((err) => {

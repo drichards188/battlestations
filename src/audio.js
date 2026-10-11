@@ -7,24 +7,48 @@
 const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
 const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
 const pick = (list) => (list && list.length ? list[Math.floor(Math.random() * list.length)] : null);
+// callers often pass scratch vectors they reuse at once: keep a copy of where the sound began
+const here = (p) => ({ x: p.x, y: p.y, z: p.z });
 
 const SOUND_SPEED = 343;
 const MAX_DELAY = 6;
-const MAX_VOICES = 72; // positional one-shots (buffer playback is cheap)
+const MAX_VOICES = 96; // positional one-shots (buffer playback is cheap)
 const DIRECT_VOICES = 32; // the player's gun, UI cues and ambience one-shots
 const ENGINE_VOICES = 6;
 const AUDIBLE = 0.002;
-// far small-arms fire is not worth a voice: it only feeds the battle rumble
-const MIN_GAIN = { gun: 0.005, mg: 0.01 };
+// far small-arms fire is not worth a voice: it only feeds the battle rumble (a 40mm beyond about
+// 2 km, a 20mm beyond 800 m)
+const MIN_GAIN = { gun: 0.012, mg: 0.01 };
 
 // per-frame caps and minimum spacing (s) for queued world events; close events get triple caps
 const CAPS = { gun: 3, bigGun: 2, mg: 1, flak: 3, explosion: 3, splash: 3, hit: 3, whistle: 1, torpedo: 1 };
 const GAPS = { gun: 0.02, bigGun: 0.04, mg: 0.05, flak: 0.04, explosion: 0, splash: 0.04, hit: 0.03, whistle: 0.2, torpedo: 0 };
 
-// bank: which sample set; near / mid: distance bands (m) for the near, mid and far renderings
+// bank: which sample set; near / mid: distance bands (m) for the near, mid and far renderings;
+// beat: an AI mount voices at most one report per beat (a quad's paired guns fire together, an
+// Oerlikon's rounds run into a burst); the rounds in between feed the battle rumble
+// Real recordings in public/audio (sources and licenses in public/audio/CREDITS.md): Freesound
+// CC0 and CC BY uploads and US Navy public-domain sound. Each is cut into slices [start, length]
+// (seconds, found by onset analysis) that replace or layer into the synthesized banks once both
+// are ready; anything missing or undecodable leaves the synthesized sound in place.
+const RECORDINGS = {
+  gun5: { file: 'cannon-shot-187767.mp3', slices: [[0.1, 2.4], [6.36, 2.4]] }, // US Navy cannon (CC0)
+  gun76: { file: 'gun76-shots-332935.mp3', slices: [[0.68, 1.4], [6.67, 1.4], [19.15, 1.4]] }, // 76mm, Yle archive (CC BY)
+  bofors: { file: 'bofors-burst-486028.mp3', slices: [[0.92, 0.56], [1.51, 0.6], [2.145, 0.6], [2.76, 0.6], [3.375, 0.56], [3.965, 0.6]] }, // period automatic gun (CC0)
+  avenger: { file: 'avenger50-160355.mp3', slices: [[0.615, 0.18], [0.81, 0.15], [0.955, 0.3], [3.28, 0.35]] }, // US Army .50 cal (CC0)
+  distant: { file: 'distant-explosions-438693.mp3', slices: [[1.35, 2.4], [6.2, 2.6], [14.1, 2.6], [29.0, 2.6], [34.35, 2.6], [48.1, 2.6], [53.6, 2.6], [72.4, 2.6], [76.15, 2.6], [87.4, 2.6]] }, // (CC0)
+  blast: { file: 'explosion-182429.mp3', slices: [[0, 3]] }, // US government video (CC0)
+  brass: { file: 'shell-casings-318964.mp3', slices: [[8.49, 0.4], [13.04, 0.25], [16.8, 0.2], [18.95, 0.5], [20.92, 0.25], [23.17, 0.5], [25.9, 0.3], [27.83, 0.5], [39.2, 0.5]] }, // (CC0)
+  pole: { file: 'metal-pole-drop-188206.mp3', slices: [[13.02, 0.8], [15.4, 0.8], [17.68, 0.8], [28.07, 0.9], [29.18, 0.9], [31.68, 0.9], [33.11, 0.8]] }, // (CC0)
+  // the general alarm and the 1MC call, US Navy (public domain): the gong to 3.6 s, the call from
+  // 4.2 to 10.7 s, the gong again to the end (14.4 s)
+  gq: { file: 'general-quarters-usn.ogg', voice: [4.2, 6.5] },
+  sea: { file: 'bow-wave-360631.mp3' }, // a bow wave, close (CC0)
+};
+
 const GUNS = {
-  '40mm': { bank: 'b40', ref: 28, level: 0.85, reverb: 0.06, near: 170, mid: 1100 },
-  '20mm': { bank: 'b20', ref: 16, level: 0.6, reverb: 0.04, near: 120, mid: 700 },
+  '40mm': { bank: 'b40', ref: 28, level: 0.85, reverb: 0.06, near: 170, mid: 1100, beat: 0.2 },
+  '20mm': { bank: 'b20', ref: 16, level: 0.6, reverb: 0.04, near: 120, mid: 700, beat: 0.22 },
   '5in': { bank: 'b5', ref: 75, level: 1.1, reverb: 0.16, near: 450, mid: 2000, big: true },
   '16in': { bank: 'b16', ref: 450, level: 1.3, reverb: 0.3, near: 1500, mid: 1500, big: true },
 };
@@ -646,6 +670,11 @@ function bankTasks(SR, make) {
 export class AudioEngine {
   constructor() {
     this.ctx = null;
+    // the general alarm's bytes are fetched at once, before there is an audio context to decode
+    // them with, so the opening can sound it the moment the player clicks
+    this.gqBytes = fetch(`${import.meta.env?.BASE_URL ?? '/'}audio/${RECORDINGS.gq.file}`)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
     this.volume = 0.8;
     this.musicVolume = 0.5;
     this.muted = false;
@@ -654,6 +683,7 @@ export class AudioEngine {
     this.listenerVel = { x: 0, y: 0, z: 0 };
     this.lastPos = null;
     this.queue = [];
+    this.inFlight = []; // sounds still travelling to the listener
     this.voices = [];
     this.posVoices = 0;
     this.directVoices = 0;
@@ -719,6 +749,11 @@ export class AudioEngine {
     soft.curve = sc;
     this.mix.connect(this.deafLp).connect(this.master).connect(comp).connect(wall).connect(soft).connect(ctx.destination);
 
+    // the ship's 1MC: its speakers are in the compartment with the player, so below decks it
+    // isn't muffled with the world outside
+    this.pa = ctx.createGain();
+    this.pa.connect(this.master);
+
     // ringing ears after a near blast, not muffled by the deafness filter
     this.ringGain = ctx.createGain();
     this.ringGain.gain.value = 0;
@@ -754,6 +789,16 @@ export class AudioEngine {
     this.engineBus = bus(0.85, this.duckBus);
     this.music = bus(this.musicVolume * 0.45, this.duckBus);
     this.sfx = bus(1, this.sfxDuck);
+    // the rest of the battery and the fleet's guns: a dense barrage is glued together by a
+    // compressor so it roars under the player's own gun instead of burying it
+    const gunGlue = ctx.createDynamicsCompressor();
+    gunGlue.threshold.value = -20;
+    gunGlue.knee.value = 8;
+    gunGlue.ratio.value = 4;
+    gunGlue.attack.value = 0.004;
+    gunGlue.release.value = 0.18;
+    gunGlue.connect(this.sfxDuck);
+    this.guns = bus(0.8, gunGlue);
     this.blast = bus(1); // a close 5in or bomb: never ducked by itself
     this.stinger = bus(0.6);
     const musicVerb = ctx.createGain();
@@ -797,6 +842,7 @@ export class AudioEngine {
     for (const t of tasks.slice(0, split)) this.runTask(t);
     this.pending = tasks.slice(split + 1);
     this.pump();
+    this.loadRecordings();
 
     this.buildAmbience();
     this.drone = this.buildDrone();
@@ -805,6 +851,159 @@ export class AudioEngine {
     for (let i = 0; i < ENGINE_VOICES; i++) this.engines.push(this.buildEngineVoice(i));
     this.nextPad = ctx.currentTime + 1;
     this.nextStep = ctx.currentTime + 0.1;
+  }
+
+  // Real recordings: fetched and decoded in the background; once the synthesized banks are done
+  // as well they are cut up and take their places (see RECORDINGS).
+  async loadRecordings() {
+    const ctx = this.ctx;
+    const base = import.meta.env?.BASE_URL ?? '/';
+    const rec = {};
+    // the general alarm can't wait behind the rest: the opening sounds it straight away
+    try {
+      const bytes = await this.gqBytes;
+      if (bytes) rec.gq = await ctx.decodeAudioData(bytes);
+    } catch {
+      // the synthesized gong stays
+    }
+    if (rec.gq) this.setGqCall(rec.gq);
+    await Promise.all(
+      Object.entries(RECORDINGS)
+        .filter(([key]) => key !== 'gq')
+        .map(async ([key, spec]) => {
+          try {
+            const res = await fetch(`${base}audio/${spec.file}`);
+            if (res.ok) rec[key] = await ctx.decodeAudioData(await res.arrayBuffer());
+          } catch {
+            // missing or undecodable: the synthesized sound stays
+          }
+        })
+    );
+    this.rec = rec;
+    const apply = () => (this.pending.length ? setTimeout(apply, 100) : this.useRecordings());
+    apply();
+  }
+
+  useRecordings() {
+    const ctx = this.ctx, SR = ctx.sampleRate, R = this.rec, B = this.bank;
+    const make = (chans) => {
+      const b = ctx.createBuffer(chans.length, chans[0].length, SR);
+      chans.forEach((c, i) => b.copyToChannel(c, i));
+      return b;
+    };
+    // each slice mixed to mono, its DC removed, faded in and out, normalized
+    const cut = (key) => {
+      const buf = R[key];
+      if (!buf) return [];
+      return (RECORDINGS[key].slices || [[0, buf.duration]]).map(([t0, len]) => {
+        const a = Math.floor(t0 * SR), n = Math.max(1, Math.min(Math.floor(len * SR), buf.length - a));
+        const x = new Float32Array(n);
+        for (let c = 0; c < buf.numberOfChannels; c++) {
+          const d = buf.getChannelData(c);
+          for (let i = 0; i < n; i++) x[i] += d[a + i] / buf.numberOfChannels;
+        }
+        let mean = 0;
+        for (let i = 0; i < n; i++) mean += x[i];
+        mean /= n;
+        const fin = Math.min(n, Math.round(0.003 * SR)), fout = Math.round(n * 0.3);
+        for (let i = 0; i < n; i++) x[i] -= mean;
+        for (let i = 0; i < fin; i++) x[i] *= i / fin;
+        for (let i = 0; i < fout; i++) x[n - 1 - i] *= Math.pow(i / fout, 1.5);
+        return normalize(x, 0.95);
+      });
+    };
+    // lower and longer (a bigger object), by resampling
+    const pitch = (x, rate) => {
+      const n = Math.floor(x.length / rate), o = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const p = i * rate, j = Math.floor(p), f = p - j;
+        o[i] = (x[j] || 0) * (1 - f) + (x[j + 1] || 0) * f;
+      }
+      return o;
+    };
+    // a recording laid over a synthesized buffer (all channels), then normalized together
+    const blend = (buf, x, g) => {
+      if (!buf || buf.sampleRate !== SR) return buf;
+      const n = Math.max(buf.length, x.length);
+      const chans = [];
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const o = new Float32Array(n);
+        o.set(buf.getChannelData(c));
+        for (let i = 0; i < x.length; i++) o[i] += x[i] * g;
+        chans.push(o);
+      }
+      let pk = 1e-6;
+      for (const o of chans) for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(o[i]));
+      for (const o of chans) for (let i = 0; i < n; i++) o[i] *= 0.95 / pk;
+      return make(chans);
+    };
+    const rng = mulberry(4242);
+    const ROLL = { count: 18, t0: 0.25, t1: 3.2, gain: 0.55, f: 380 };
+    const ROLL_SMALL = { count: 14, t0: 0.12, t1: 1.6, gain: 0.45, f: 700 };
+
+    // 5in: the Navy cannon and the 76mm shots replace the synthesis, close up and through distance
+    const five = [...cut('gun5'), ...cut('gun76')];
+    if (five.length) {
+      B.b5 ||= {};
+      B.b5.player = five.map((x) => make(ship(SR, x)));
+      B.b5.near = five.map((x) => make([Float32Array.from(x)]));
+      B.b5.mid = five.map((x) => make(distant(SR, rng, x, 'mid', { len: 3, roll: ROLL })));
+      B.b5.far = five.map((x) => make(distant(SR, rng, x, 'far', { len: 4, roll: ROLL })));
+    }
+    // 40mm and 20mm: the synthesized body stays (the deep "pom"), real fire laid over it
+    const bof = cut('bofors');
+    if (bof.length && B.b40) {
+      for (const key of ['player', 'clip', 'near']) if (B.b40[key]) B.b40[key] = B.b40[key].map((b, i) => blend(b, bof[(i + (key === 'near' ? 2 : 0)) % bof.length], 0.55));
+    }
+    const av = cut('avenger');
+    if (av.length && B.b20) {
+      for (const key of ['player', 'near']) if (B.b20[key]) B.b20[key] = B.b20[key].map((b, i) => blend(b, av[i % av.length], 0.5));
+    }
+    // flak and explosions
+    const dist = cut('distant');
+    if (dist.length) {
+      B.flak ||= {};
+      B.flak.near = dist.map((x) => make([Float32Array.from(x)]));
+      B.flak.far = dist.map((x) => make(distant(SR, rng, x, 'far', { len: 2.8, roll: ROLL_SMALL })));
+    }
+    const blast = cut('blast');
+    if (blast.length && B.boom) {
+      const b = blast[0];
+      B.boom.bomb = [make([Float32Array.from(b)]), make([normalize(pitch(b, 0.86), 0.95)])];
+      B.boom.huge = [make([normalize(pitch(b, 0.72), 0.95)])];
+      if (dist.length) B.boom.far = dist.slice(0, 4).map((x) => make(distant(SR, rng, pitch(x, 0.8), 'far', { len: 5, roll: ROLL })));
+    }
+    // brass: small cases for the 20mm, the heavier 40mm cases from a pitched-down metal drop
+    const brass = cut('brass'), pole = cut('pole');
+    if (brass.length && B.casing) B.casing.small = brass.map((x) => make([x]));
+    if (pole.length && B.casing) B.casing.big = pole.map((x) => make([normalize(pitch(x, 0.72), 0.9)]));
+    // the sea along the hull: the bow-wave recording replaces the rush noise, looped seamlessly
+    // (its tail crossfaded into its head) and matched to the noise's loudness
+    if (R.sea && this.rushNoise) {
+      const src = R.sea, n = src.length, L = Math.min(Math.floor(3 * SR), Math.floor(n / 4));
+      const chans = [];
+      let sum = 0;
+      for (let c = 0; c < src.numberOfChannels; c++) {
+        const d = src.getChannelData(c), o = new Float32Array(n - L);
+        for (let i = 0; i < n - L; i++) o[i] = d[i];
+        for (let i = 0; i < L; i++) {
+          const k = i / L;
+          o[i] = d[i] * k + d[n - L + i] * (1 - k);
+        }
+        for (let i = 0; i < o.length; i += 8) sum += o[i] * o[i];
+        chans.push(o);
+      }
+      const rms = Math.sqrt(sum / ((chans[0].length / 8) * chans.length)) || 1;
+      const loop = ctx.createBufferSource();
+      loop.buffer = make(chans);
+      loop.loop = true;
+      const g = ctx.createGain();
+      g.gain.value = 0.12 / rms;
+      loop.connect(g).connect(this.rushGain);
+      loop.start(0, Math.random() * loop.buffer.duration);
+      this.rushNoise.disconnect();
+    }
+    this.recordingsInUse = Object.keys(R);
   }
 
   runTask([group, key, fn]) {
@@ -846,7 +1045,8 @@ export class AudioEngine {
     // water rushing along the hull and the bow wave
     this.rushBp = filter('bandpass', 850, 0.6);
     this.rushGain = gain();
-    chain(this.loop(this.pink), [this.rushBp, this.rushGain], this.amb);
+    this.rushNoise = this.loop(this.pink);
+    chain(this.rushNoise, [this.rushBp, this.rushGain], this.amb);
 
     this.windFilter = filter('bandpass', 400, 0.7);
     this.windGain = gain();
@@ -1152,10 +1352,20 @@ export class AudioEngine {
 
   // Out of voices: silence the quietest positional voice if the new sound is clearly louder.
   steal(g) {
-    let quiet = null;
-    for (const v of this.voices) if (!v.direct && !v.stolen && (!quiet || v.g < quiet.g)) quiet = v;
-    if (!quiet || quiet.g > g * 0.5) return false;
+    // how loud each voice is now: a report fades fast after its attack (a voice still waiting
+    // out its travel delay counts at full strength)
     const now = this.ctx.currentTime;
+    let quiet = null, quietG = Infinity;
+    for (const v of this.voices) {
+      if (v.direct || v.stolen) continue;
+      const age = now - v.t0;
+      const vg = age > 0 ? v.g * Math.exp(-age / 0.35) : v.g;
+      if (vg < quietG) {
+        quietG = vg;
+        quiet = v;
+      }
+    }
+    if (!quiet || quietG > g * 0.6) return false;
     quiet.out.gain.cancelScheduledValues(now);
     quiet.out.gain.setTargetAtTime(0, now, 0.015);
     quiet.stolen = true;
@@ -1188,7 +1398,8 @@ export class AudioEngine {
       out.connect(send).connect(this.reverbSend);
       nodes.push(send);
     }
-    const at = delay ? Math.min(d / SOUND_SPEED, MAX_DELAY) : 0;
+    // (a sound that has already travelled to us plays now)
+    const at = delay && !this.arriving ? Math.min(d / SOUND_SPEED, MAX_DELAY) : 0;
     return { dest: lp, out, t0: ctx.currentTime + at + 0.01, d, g, end: 0, nodes, direct: false, stolen: false };
   }
 
@@ -1241,12 +1452,42 @@ export class AudioEngine {
   }
 
   enqueue(kind, pos, ref, level, play) {
-    const g = this.gainAt(this.dist(pos), ref, level);
+    const d = this.dist(pos);
+    const g = this.gainAt(d, ref, level);
     if (g < (MIN_GAIN[kind] ?? AUDIBLE)) {
       this.bedEnergy += g * 0.15;
       return;
     }
+    // a sound from farther off is still on its way; it takes a voice only when it arrives, so
+    // the voice pool holds what can actually be heard
+    const delay = Math.min(d / SOUND_SPEED, MAX_DELAY);
+    if (delay > 0.08) {
+      const e = { at: this.ctx.currentTime + delay, kind, pos, ref, level, play, g };
+      if (this.inFlight.length < 1024) this.inFlight.push(e);
+      else {
+        // full: a louder sound takes the place of the quietest one still travelling
+        let qi = 0;
+        for (let i = 1; i < this.inFlight.length; i++) if (this.inFlight[i].g < this.inFlight[qi].g) qi = i;
+        const q = this.inFlight[qi];
+        this.bedEnergy += Math.min(q.g, g) * 0.15;
+        if (q.g < g) this.inFlight[qi] = e;
+      }
+      return;
+    }
     if (this.queue.length < 256) this.queue.push({ kind, g, play });
+  }
+
+  // sounds whose travel time is up join this frame's queue and play at once
+  land(now) {
+    let j = 0;
+    for (const e of this.inFlight) {
+      if (e.at > now) {
+        this.inFlight[j++] = e;
+        continue;
+      }
+      if (this.queue.length < 256) this.queue.push({ kind: e.kind, g: this.gainAt(this.dist(e.pos), e.ref, e.level), play: e.play, arrived: true });
+    }
+    this.inFlight.length = j;
   }
 
   flush(now) {
@@ -1267,7 +1508,9 @@ export class AudioEngine {
       }
       used[e.kind] = n + 1;
       this.lastPlay[e.kind] = now;
+      this.arriving = !!e.arrived;
       e.play();
+      this.arriving = false;
     }
     q.length = 0;
   }
@@ -1360,18 +1603,28 @@ export class AudioEngine {
       this.strafe(pos);
       return;
     }
+    pos = here(pos);
     const spec = GUNS[kind] || GUNS['40mm'];
+    const src = opts.src;
+    if (src && spec.beat) {
+      const now = this.ctx.currentTime;
+      if (now - (src.lastSound ?? -9) < spec.beat) {
+        this.bedEnergy += this.gainAt(this.dist(pos), spec.ref, spec.level) * 0.05;
+        return;
+      }
+      src.lastSound = now;
+    }
     this.enqueue(spec.big ? 'bigGun' : 'gun', pos, spec.ref, spec.level, () => {
       const d = this.dist(pos);
       const close = spec.big && d < spec.near * 0.6;
       const buf = this.variant(this.bank[spec.bank], d, spec.near, spec.mid);
       if (!buf) return;
-      const r = this.route(pos, { ref: spec.ref, level: spec.level, reverb: spec.reverb, hrtf: d < 300, bus: close ? this.blast : this.sfx });
+      const r = this.route(pos, { ref: spec.ref, level: spec.level, reverb: spec.reverb, hrtf: d < 60, bus: close ? this.blast : this.guns });
       if (!r) return;
       this.playBuf(r, buf, { rate: 0.95 + Math.random() * 0.1 });
       this.finish(r);
       // a 5in going off next to you swallows everything else for a moment
-      if (close) this.duck(0.3 + 0.5 * clamp(d / (spec.near * 0.6), 0, 1), 0.7, true);
+      if (close) this.duck(0.55 + 0.4 * clamp(d / (spec.near * 0.6), 0, 1), 0.4, true);
     });
   }
 
@@ -1393,7 +1646,7 @@ export class AudioEngine {
     this.finish(r);
     // a 5in going off under you swallows everything else for a moment
     if (big) this.duck(0.35, 0.6, true);
-    else this.duck(small ? 0.85 : 0.7, small ? 0.08 : 0.14);
+    else this.duck(small ? 0.85 : 0.75, small ? 0.08 : 0.14, true);
   }
 
   /** A loader drops a full 4-round clip into the guides of gun `barrel` (0..3). */
@@ -1425,6 +1678,7 @@ export class AudioEngine {
   strafe(pos) {
     const set = this.bank.mg;
     if (!set) return;
+    pos = here(pos);
     this.enqueue('mg', pos, 22, 0.6, () => {
       const d = this.dist(pos);
       const r = this.route(pos, { ref: 22, level: 0.6, reverb: 0.05, hrtf: d < 300 });
@@ -1447,6 +1701,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const set = this.bank.flak;
     if (!set) return;
+    pos = here(pos);
     this.enqueue('flak', pos, 55, 0.95, () => {
       const d = this.dist(pos);
       const r = this.route(pos, { ref: 55, level: 0.95, reverb: 0.25, hrtf: d < 400 });
@@ -1460,6 +1715,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const set = this.bank.boom;
     if (!set) return;
+    pos = here(pos);
     const s = clamp(size, 0, 1);
     const cls = s >= 0.85 ? 'huge' : s >= 0.45 ? 'bomb' : 'air';
     const ref = 40 + 140 * s, level = 0.9 + 0.4 * s;
@@ -1479,6 +1735,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const set = this.bank.splash;
     if (!set) return;
+    pos = here(pos);
     const s = clamp(size, 0, 1);
     const ref = 15 + 70 * s, level = 0.5 + 0.5 * s;
     this.enqueue('splash', pos, ref, level, () => {
@@ -1534,6 +1791,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const set = this.bank.hit;
     if (!set) return;
+    pos = here(pos);
     const steel = kind === 'steel';
     const ref = steel ? 6 : 25, level = steel ? 0.75 : 0.7;
     this.enqueue('hit', pos, ref, level, () => {
@@ -1548,6 +1806,7 @@ export class AudioEngine {
     if (!this.ctx) return;
     const set = this.bank.splash;
     if (!set) return;
+    pos = here(pos);
     this.enqueue('torpedo', pos, 160, 1.2, () => {
       const d = this.dist(pos);
       const close = d < 300;
@@ -1586,7 +1845,7 @@ export class AudioEngine {
 
   throttled(name, gap) {
     const now = this.ctx.currentTime;
-    if (now - (this.throttle[name] ?? -1) < gap) return true;
+    if (now - (this.throttle[name] ?? -Infinity) < gap) return true;
     this.throttle[name] = now;
     return false;
   }
@@ -1647,9 +1906,182 @@ export class AudioEngine {
   }
 
   // general quarters: the ship's alarm gong through the 1MC speakers
+  /**
+   * The ship's steam whistle sounding `pattern`: blast lengths in seconds, one short and one long
+   * with a quick pause between. A deep single-tone whistle: the note comes up to pitch as the
+   * steam reaches pressure, its harmonics ring off the funnels and superstructure, and the steam
+   * hisses through it.
+   */
+  shipHorn(pattern = [0.7, 3.8], gap = 0.25) {
+    if (!this.ctx || this.throttled('shipHorn', 6)) return;
+    const ctx = this.ctx;
+    const r = this.direct({ level: 0.6, bus: this.near, reverb: 0.45, force: true });
+    if (!r) return;
+    const f = 98; // G2
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 1100;
+    tone.Q.value = 0.8;
+    tone.connect(r.dest);
+    r.nodes.push(tone);
+    let at = 0;
+    for (const len of pattern) {
+      const t0 = r.t0 + at, t1 = t0 + len;
+      // a short blast gets up to pitch and lets go quicker than a long one
+      const rise = Math.min(0.35, len * 0.3), fall = Math.min(0.3, len * 0.25);
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, t0);
+      env.gain.linearRampToValueAtTime(1, t0 + rise);
+      env.gain.setValueAtTime(1, t1 - fall);
+      env.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.25);
+      env.connect(tone);
+      r.nodes.push(env);
+      // the body and its octave, slightly apart so the tone beats like a big whistle's
+      for (const [type, mul, gain, det] of [['sawtooth', 1, 0.45, 0], ['sawtooth', 1, 0.3, 4], ['sine', 2, 0.25, -3], ['triangle', 3, 0.1, 2]]) {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.detune.value = det;
+        o.frequency.setValueAtTime(f * mul * 0.9, t0);
+        o.frequency.exponentialRampToValueAtTime(f * mul, t0 + rise + 0.1);
+        o.frequency.setValueAtTime(f * mul, t1);
+        o.frequency.exponentialRampToValueAtTime(f * mul * 0.94, t1 + 0.25);
+        const g = ctx.createGain();
+        g.gain.value = gain;
+        o.connect(g).connect(env);
+        o.start(t0);
+        o.stop(t1 + 0.3);
+        r.nodes.push(g);
+      }
+      // the steam: a breathy hiss under the note, louder as the valve cracks open
+      this.noise(r, { at, dur: len + 0.2, freq: 2600, q: 0.6, gain: 0.07, attack: 0.15, buf: this.pink });
+      this.noise(r, { at, dur: Math.min(0.5, len), freq: 1400, q: 0.8, gain: 0.12, attack: 0.02 });
+      at += len + gap;
+    }
+    r.end = Math.max(r.end, r.t0 + at + 0.5);
+    this.finish(r);
+  }
+
+  /** A parachute flare's candle catching (or a float light hitting the water): faint unless close. */
+  flareIgnite(pos, kind = 'para') {
+    if (!this.ctx) return;
+    pos = here(pos);
+    this.enqueue('flak', pos, 30, 0.5, () => {
+      const r = this.route(pos, { ref: 30, level: 0.5, reverb: 0.3 });
+      if (!r) return;
+      if (kind === 'para') {
+        this.noise(r, { dur: 0.05, freq: 900, q: 1, gain: 0.5 }); // the ejection charge
+        this.noise(r, { at: 0.08, dur: 1.4, freq: 3000, q: 0.5, gain: 0.12, attack: 0.15 }); // the candle catching
+      } else {
+        this.noise(r, { dur: 0.25, freq: 600, q: 0.6, gain: 0.4, buf: this.brown }); // into the water
+        this.noise(r, { at: 0.2, dur: 1.2, freq: 2400, q: 0.6, gain: 0.1, attack: 0.2 }); // fizzing alight
+      }
+      this.finish(r);
+    });
+  }
+
+  // ---- the run to battle stations (General Quarters opening)
+
+  /** A boot on steel: `kind` 'deck' (a passageway or the weather deck), 'ladder' (a tread), 'grate'. */
+  footstep(kind = 'deck', level = 1) {
+    if (!this.ctx) return;
+    const r = this.direct({ level: 0.3 * level, pan: Math.random() * 0.3 - 0.15, reverb: kind === 'deck' ? 0.12 : 0.18 });
+    if (!r) return;
+    const ladder = kind === 'ladder';
+    this.noise(r, { dur: 0.05, freq: ladder ? 900 : 420, q: 0.9, gain: 0.5, buf: this.brown }); // heel
+    this.noise(r, { at: 0.02, dur: 0.03, freq: ladder ? 3200 : 2200, q: 1.2, gain: 0.18 }); // grit and nails
+    if (ladder) this.ring(r, { at: 0.005, f: 340 + Math.random() * 60, dur: 0.35, gain: 0.08, partials: [[1, 1], [2.4, 0.4], [4.6, 0.25]] });
+    this.finish(r);
+  }
+
+  /** A watertight door swung open against its stop, or a hatch cover dropped back. */
+  doorClang(size = 1) {
+    if (!this.ctx) return;
+    const r = this.direct({ level: 0.5, reverb: 0.3 });
+    if (!r) return;
+    this.noise(r, { dur: 0.03, freq: 1600, q: 1, gain: 0.3 }); // dogs knocked off
+    this.noise(r, { at: 0.18, dur: 0.12, freq: 180, type: 'lowpass', gain: 0.7 * size, buf: this.brown }); // the door hits its stop
+    this.ring(r, { at: 0.18, f: 150 + Math.random() * 30, dur: 1.2, gain: 0.14 * size, partials: [[1, 1], [2.3, 0.6], [3.9, 0.35], [6.1, 0.15]] });
+    this.finish(r);
+  }
+
+  /** Below decks: ventilation fans and the ship's machinery hum, and the world outside muffled. */
+  setInterior(on) {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    if (!this.interiorHum) {
+      const out = ctx.createGain();
+      out.gain.value = 0;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 180;
+      bp.Q.value = 0.6;
+      this.loop(this.brown).connect(bp).connect(out);
+      const fan = ctx.createOscillator();
+      fan.type = 'triangle';
+      fan.frequency.value = 118;
+      const fg = ctx.createGain();
+      fg.gain.value = 0.05;
+      fan.connect(fg).connect(out);
+      fan.start();
+      out.connect(this.duckBus);
+      this.interiorHum = out;
+    }
+    const now = ctx.currentTime;
+    this.interiorHum.gain.setTargetAtTime(on ? 0.35 : 0, now, on ? 0.2 : 0.6);
+    // steel all round: the sea and the battle outside come through dull (see update)
+    this.interior = on;
+  }
+
+  /** The real general alarm and 1MC call arrived: keep it, and a cut of just the call. */
+  setGqCall(buf) {
+    this.gqCall = buf;
+    const [t0, len] = RECORDINGS.gq.voice;
+    const SR = buf.sampleRate, a = Math.floor(t0 * SR), n = Math.min(Math.floor(len * SR), buf.length - a);
+    if (n > SR) {
+      const out = this.ctx.createBuffer(buf.numberOfChannels, n, SR);
+      const fade = Math.floor(0.05 * SR);
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const src = buf.getChannelData(c).subarray(a, a + n);
+        const d = out.getChannelData(c);
+        for (let i = 0; i < n; i++) d[i] = src[i] * Math.min(1, i / fade, (n - 1 - i) / fade);
+      }
+      this.gqVoice = out;
+    }
+    // the alarm was called while it was still loading: sound it now
+    if (this.alarmWanted != null) this.play1MC(buf);
+    this.alarmWanted = null;
+  }
+
+  // through the 1MC speakers: a little of the compartment's steel ring
+  play1MC(buf, level = 0.8) {
+    const r = this.direct({ level, bus: this.pa, reverb: 0.08, force: true });
+    if (!r) return;
+    this.playBuf(r, buf);
+    this.finish(r);
+  }
+
+  /** General quarters: the general alarm and the bosun's mate's call on the 1MC. */
   alarm() {
     if (!this.ctx || this.throttled('alarm', 4)) return;
-    const r = this.direct({ level: 0.5, bus: this.near, filter: { type: 'bandpass', freq: 1100, q: 0.6 }, reverb: 0.35, force: true });
+    if (this.gqCall) return this.play1MC(this.gqCall);
+    // still loading (it's small and goes first): wait a moment for it, then make do with the gong
+    this.alarmWanted = this.ctx.currentTime;
+    setTimeout(() => {
+      if (this.alarmWanted == null) return;
+      this.alarmWanted = null;
+      this.alarmGong();
+    }, 1500);
+  }
+
+  /** The bosun's mate repeats the call (the alarm's gong doesn't sound again). */
+  gqRepeat() {
+    if (!this.ctx || !this.gqVoice) return;
+    this.play1MC(this.gqVoice);
+  }
+
+  // without the recording: the alarm's gong, synthesized
+  alarmGong() {
+    const r = this.direct({ level: 0.45, bus: this.pa, filter: { type: 'bandpass', freq: 1100, q: 0.6 }, reverb: 0.2, force: true });
     if (!r) return;
     for (let i = 0; i < 14; i++) {
       this.ring(r, { at: i * 0.36, f: 640, dur: 0.45, gain: 0.5, partials: [[1, 1], [2, 0.5], [2.76, 0.35], [4.1, 0.15]] });
@@ -2034,6 +2466,7 @@ export class AudioEngine {
     if (s) Object.assign(this.state, s);
     if (this.ctx.state !== 'running') {
       this.queue.length = 0;
+      this.inFlight.length = 0;
       return;
     }
     const st = this.state;
@@ -2084,6 +2517,7 @@ export class AudioEngine {
     lp.z = pz;
 
     this.reap(now);
+    this.land(now);
     this.flush(now);
     this.updateEngines(dt, now);
 
@@ -2099,7 +2533,7 @@ export class AudioEngine {
     }
 
     // ambience
-    this.amb.gain.setTargetAtTime(st.zoom ? 0.75 : 1, now, 0.3);
+    this.amb.gain.setTargetAtTime(this.interior ? 0.25 : st.zoom ? 0.75 : 1, now, 0.3);
     const swell = 0.5 + 0.5 * Math.sin(now * 0.55) * Math.sin(now * 0.21 + 1.3);
     this.washGain.gain.setTargetAtTime((0.09 + 0.08 * swell) * (1 + 0.25 * st.wind), now, 0.3);
     this.washLp.frequency.setTargetAtTime(380 + 320 * swell + 80 * st.wind, now, 0.3);
@@ -2132,8 +2566,9 @@ export class AudioEngine {
 
     // deafness after a near blast: muffled mix and ringing
     const df = clamp(st.deafen || 0, 0, 1);
-    const cutoff = df > 0.01 ? 20000 * Math.pow(350 / 20000, Math.pow(df, 0.6)) : 20000;
-    this.deafLp.frequency.setTargetAtTime(cutoff, now, 0.08);
+    let cutoff = df > 0.01 ? 20000 * Math.pow(350 / 20000, Math.pow(df, 0.6)) : 20000;
+    if (this.interior) cutoff = Math.min(cutoff, 900); // below decks, steel all round
+    this.deafLp.frequency.setTargetAtTime(cutoff, now, this.interior ? 0.15 : 0.08);
     this.ringGain.gain.setTargetAtTime(0.045 * df * df, now, 0.1);
 
     if (this.musicVolume > 0) this.updateMusic(dt, now);

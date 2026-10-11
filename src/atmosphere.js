@@ -7,10 +7,28 @@ const DEG = Math.PI / 180;
 function addStarsAndMoon(material) {
   material.uniforms.uStorm = { value: 0 };
   material.uniforms.uFlash = { value: 0 };
-  material.fragmentShader = 'uniform float uStorm;\nuniform float uFlash;\n' + material.fragmentShader.replace(
+  material.uniforms.uMoonDir = { value: new THREE.Vector3(0, -1, 0) };
+  material.uniforms.uMoonSky = { value: 0 };
+  material.fragmentShader = 'uniform float uStorm;\nuniform float uFlash;\nuniform vec3 uMoonDir;\nuniform float uMoonSky;\n' + material.fragmentShader.replace(
     'gl_FragColor = vec4( texColor, 1.0 );',
     /* glsl */ `
     float night = (1.0 - smoothstep(-0.12, 0.04, vSunDirection.y)) * (1.0 - uStorm);
+    // afterglow: after sunset the horizon under the sun keeps a warm band that fades through
+    // nautical twilight (the Preetham model above goes black once the sun is 2 degrees down)
+    float sunEl = degrees(asin(clamp(vSunDirection.y, -1.0, 1.0)));
+    if (sunEl < 2.0 && sunEl > -20.0) {
+      float tw = 0.06 * exp(min(sunEl + 2.0, 0.0) / 3.2) * (1.0 - smoothstep(-1.0, 2.0, sunEl));
+      vec2 sh = normalize(vSunDirection.xz + vec2(1e-5));
+      vec2 dh = normalize(direction.xz + vec2(1e-5));
+      float toward = 0.5 + 0.5 * dot(sh, dh);
+      float up = max(direction.y, 0.0);
+      float band = exp(-up * mix(5.0, 14.0, toward));
+      vec3 glowCol = mix(vec3(0.16, 0.2, 0.42), vec3(1.0, 0.45, 0.16), pow(toward, 3.0) * smoothstep(-14.0, -2.0, sunEl));
+      texColor += glowCol * tw * band * (0.25 + 0.75 * pow(toward, 2.0)) * (1.0 - uStorm * 0.8);
+      // and the whole dome stays a deepening blue through civil and nautical twilight
+      float dome = 0.2 * exp(min(sunEl + 2.0, 0.0) / 2.8) * (1.0 - smoothstep(-2.0, 1.0, sunEl));
+      texColor += vec3(0.1, 0.16, 0.32) * dome * (0.6 + 0.4 * toward) * (0.7 + 0.3 * (1.0 - up)) * (1.0 - uStorm * 0.7);
+    }
     if (night > 0.0 && direction.y > 0.0) {
       vec3 sd = direction * 350.0;
       vec3 cell = floor(sd);
@@ -22,12 +40,31 @@ function addStarsAndMoon(material) {
       vec3 starCol = mix(vec3(0.7, 0.8, 1.0), vec3(1.0, 0.85, 0.7), h2);
       // faint milky band
       float band = exp(-pow(dot(direction, normalize(vec3(0.3, 0.2, 1.0))) * 3.5, 2.0));
-      texColor += starCol * star * tw * night * 1.2 * smoothstep(0.0, 0.25, direction.y);
-      texColor += vec3(0.02, 0.024, 0.045) * band * night * smoothstep(0.0, 0.4, direction.y);
-      float md = dot(direction, -vSunDirection);
-      float moon = smoothstep(0.99955, 0.99975, md);
-      float moonGlow = pow(max(md, 0.0), 180.0);
-      texColor += vec3(0.8, 0.85, 1.0) * (moon * 1.4 + moonGlow * 0.04) * night;
+      // the moon's own sky: a dim blue glow, brighter toward the horizon and round the moon
+      vec3 mD = normalize(uMoonDir);
+      float md = dot(direction, mD);
+      float mUp = smoothstep(-0.04, 0.12, mD.y);
+      vec3 moonSky = vec3(0.1, 0.15, 0.28) * (0.35 + 0.65 * pow(1.0 - direction.y, 3.0)) * (1.0 + 1.5 * pow(max(md, 0.0), 40.0));
+      texColor += moonSky * uMoonSky * mUp * night;
+      float starDim = 1.0 - 0.6 * smoothstep(0.0, 0.03, uMoonSky * mUp) * pow(max(md, 0.0), 4.0);
+      texColor += starCol * star * tw * night * 1.2 * smoothstep(0.0, 0.25, direction.y) * starDim;
+      texColor += vec3(0.02, 0.024, 0.045) * band * night * smoothstep(0.0, 0.4, direction.y) * starDim;
+      // the disc, lit on the side facing the sun: a crescent, a half or a full moon as the
+      // geometry gives it, with a little earthshine on the dark limb (drawn a few times its
+      // true size so it reads on screen)
+      const float MOON_R = 0.016;
+      vec3 e1 = normalize(cross(mD, abs(mD.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+      vec3 e2 = cross(e1, mD);
+      vec2 mq = vec2(dot(direction, e1), dot(direction, e2)) / MOON_R;
+      float mr2 = dot(mq, mq);
+      if (md > 0.0 && mr2 < 1.0) {
+        vec3 mn = e1 * mq.x + e2 * mq.y - mD * sqrt(1.0 - mr2);
+        float lit = smoothstep(-0.04, 0.08, dot(mn, vSunDirection));
+        float maria = 0.82 + 0.18 * sin(mq.x * 4.7 + 1.3) * sin(mq.y * 3.9 + 0.4);
+        float edge = 1.0 - smoothstep(0.86, 1.0, mr2);
+        texColor += vec3(0.82, 0.86, 1.0) * (lit * 1.4 * maria + 0.015) * edge * night;
+      }
+      texColor += vec3(0.8, 0.85, 1.0) * pow(max(md, 0.0), 180.0) * 0.04 * uMoonSky * 25.0 * night;
     }
     // overcast: flatten the sky toward a heavy blue-grey, lit by lightning
     float skyL = dot(texColor, vec3(0.2126, 0.7152, 0.0722));
@@ -65,6 +102,11 @@ export class Atmosphere {
 
     this.sunDir = new THREE.Vector3();
     this.lightDir = new THREE.Vector3();
+    this.moonDir = new THREE.Vector3(0, -1, 0);
+    // null: the moon sits opposite the sun (full). A night battle sets { dElev, dAz }: the moon's
+    // place relative to the sun, so the two set together and the phase follows from the angle.
+    this.moon = null;
+    this.moonIllum = 1;
 
     this.sun = new THREE.DirectionalLight(0xffffff, 5);
     this.sun.castShadow = true;
@@ -99,6 +141,12 @@ export class Atmosphere {
     this.uniforms.uStorm.value = storm;
   }
 
+  /** moon: null (full, opposite the sun) or { dElev, dAz } degrees from the sun. */
+  setMoon(moon) {
+    this.moon = moon;
+    this.lastEnvKey = '';
+  }
+
   set(elevation, azimuth) {
     this.elevation = elevation;
     this.azimuth = azimuth;
@@ -106,6 +154,16 @@ export class Atmosphere {
     const theta = azimuth * DEG;
     this.sunDir.setFromSphericalCoords(1, phi, theta);
     this.uniforms.sunPosition.value.copy(this.sunDir);
+
+    if (this.moon) this.moonDir.setFromSphericalCoords(1, (90 - (elevation + this.moon.dElev)) * DEG, (azimuth + this.moon.dAz) * DEG);
+    else this.moonDir.copy(this.sunDir).negate();
+    this.uniforms.uMoonDir.value.copy(this.moonDir);
+    // fraction of the disc lit, from the sun-moon angle (elongation)
+    this.moonIllum = (1 - this.sunDir.dot(this.moonDir)) / 2;
+    const moonUp = THREE.MathUtils.smoothstep(this.moonDir.y, -0.03, 0.12);
+    // a crescent gives much less than its lit fraction (the full moon's opposition surge)
+    const moonBright = Math.pow(this.moonIllum, 1.6);
+    this.uniforms.uMoonSky.value = 0.012 + 0.2 * moonBright;
 
     const day = THREE.MathUtils.smoothstep(elevation, -2, 6);
     this.night = 1 - THREE.MathUtils.smoothstep(elevation, -8, 0);
@@ -118,19 +176,23 @@ export class Atmosphere {
       this.sun.color.setRGB(1.0, 0.42 + 0.53 * warm, 0.18 + 0.72 * warm);
       this.sun.intensity = 6.5 * day * (1 - 0.82 * this.storm);
     } else {
-      // Moonlight comes from the opposite side, kept reasonably high.
-      this.lightDir.copy(this.sunDir).negate();
-      this.lightDir.y = Math.max(this.lightDir.y, 0.45);
+      // Moonlight. The default full moon is kept reasonably high; a set moon shines from where
+      // it is (not too low, or the shadow map smears), and after moonset starlight is all there is.
+      this.lightDir.copy(this.moonDir);
+      this.lightDir.y = Math.max(this.lightDir.y, this.moon ? 0.2 : 0.45);
       this.lightDir.normalize();
       this.sun.color.setRGB(0.55, 0.65, 1.0);
-      this.sun.intensity = 0.55 * this.night * (1 - 0.8 * this.storm);
+      // (a game value: bright enough for the eye, adapted, to read the ships by)
+      const moonK = this.moon ? 1.6 * (0.12 + 0.88 * moonUp * (0.3 + 0.7 * moonBright)) : 1;
+      this.sun.intensity = 0.55 * this.night * moonK * (1 - 0.8 * this.storm);
     }
 
-    this.baseEnvIntensity = THREE.MathUtils.lerp(1.0, 0.4, this.night);
+    this.baseEnvIntensity = THREE.MathUtils.lerp(1.0, this.moon ? 0.9 : 0.4, this.night);
     this.scene.environmentIntensity = this.baseEnvIntensity;
     this.scene.backgroundIntensity = 1;
 
-    const key = `${elevation.toFixed(1)}|${azimuth.toFixed(1)}|${this.storm.toFixed(2)}`;
+    const moonKey = this.moon ? `${this.moon.dElev}|${this.moon.dAz}` : 'full';
+    const key = `${elevation.toFixed(1)}|${azimuth.toFixed(1)}|${moonKey}|${this.storm.toFixed(2)}`; // main checks the storm suffix
     if (key !== this.lastEnvKey) {
       this.lastEnvKey = key;
       this.bakeEnvironment();

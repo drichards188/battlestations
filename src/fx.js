@@ -168,6 +168,16 @@ export class FX {
           float ndl = dot(n, uLightView);
           float thin = 1.0 - t.a;
           vec3 light = uAmbient * (0.75 + 0.25 * n.y) + uSun * (0.3 + 0.7 * max(ndl, 0.0) + thin * 0.4 * max(-uLightView.z, 0.0));
+          #ifdef USE_FOG
+          // parachute flares light the smoke too (the flare uniforms come with the fog chunk)
+          for (int fi = 0; fi < 4; fi++) {
+            if (fi >= uFlareCount) break;
+            vec3 fd = uFlarePos[fi] - vFogWorldPos;
+            float d2 = dot(fd, fd);
+            vec3 fl = normalize((viewMatrix * vec4(fd, 0.0)).xyz);
+            light += uFlareCol[fi] / (d2 + 1.6e5) * (1.0 - smoothstep(9.0e6, 1.6e7, d2)) * (0.45 + 0.55 * max(dot(n, fl), 0.0) + thin * 0.3);
+          }
+          #endif
           vec3 col = vCol.rgb * light + uGlowColor * vGlow * (0.4 + t.a);
           gl_FragColor = vec4(col, a);
           #include <fog_fragment>
@@ -191,12 +201,14 @@ export class FX {
       uniforms: {
         uTex: { value: atlas },
         uFogDensity: { value: 0.0003 },
+        uGlowScale: { value: 1 }, // turned down by night, when the eye is open wide
       },
       vertexShader: /* glsl */ `
         attribute vec4 iA; // position, size
         attribute vec4 iB; // hdr color, alpha
         attribute vec4 iD; // streak vector (world, length baked in), kind
         uniform float uFogDensity;
+        uniform float uGlowScale;
         varying vec2 vUv;
         varying vec4 vCol;
         varying float vKind;
@@ -224,6 +236,7 @@ export class FX {
           }
           float d = length(p0.xyz);
           vCol = iB * exp(-d * uFogDensity);
+          vCol.rgb *= uGlowScale;
           vCol.a *= smoothstep(0.3, 1.5, -p0.z);
         }
       `,
@@ -338,32 +351,62 @@ export class FX {
     best.userData.peak = intensity;
   }
 
-  /** 5"/38 proximity burst: a flash, then a lingering black puff. */
+  // A 5in burst: a fireball, then a jet-black cloud that is most of its size at once (the
+  // explosion throws it out), ragged lobes and fragment streaks round it, then hangs in the sky
+  // for a quarter of a minute, spreading and drifting. Thinned out with distance.
   flak(p) {
-    this.addGlow(FLASH, p.x, p.y, p.z, 0, 0, 0, 0.12, 7, 12, 40, 26, 12, 1);
-    this.addGlow(FLAME, p.x, p.y, p.z, 0, 0, 0, 0.35, 3, 7, 12, 5, 1.5, 1);
-    const n = Math.max(2, Math.round(5 * this.budget));
-    for (let i = 0; i < n; i++) {
-      const sp = 3;
-      this.addSmoke(SMOKE.FLAK, p.x + rr(-2.5, 2.5), p.y + rr(-2.5, 2.5), p.z + rr(-2.5, 2.5), rr(-sp, sp), rr(-sp, sp), rr(-sp, sp), rr(8, 14), rr(5, 8), rr(16, 24), 0.05, 0.048, 0.046, 0.9, { drag: 0.6 });
+    const d = this._cam.distanceTo(p);
+    if (d > 9000) return;
+    const far = d > 3500 ? 0.4 : d > 1800 ? 0.7 : 1;
+    this.addGlow(FLASH, p.x, p.y, p.z, 0, 0, 0, 0.14, 9, 17, 46, 30, 14, 1);
+    this.addGlow(FLAME, p.x, p.y, p.z, 0, 0, 0, 0.45, 5, 10, 14, 5.5, 1.6, 1);
+    if (d < 900) this.light(p, 2500, 0.18, 0xffb070);
+    const k = Math.max(0.5, this.budget) * far;
+    // the core: dense and black
+    for (let i = 0, n = Math.max(2, Math.round(4 * k)); i < n; i++) {
+      tmpV.randomDirection().multiplyScalar(rr(0.5, 2.5));
+      this.addSmoke(SMOKE.FLAK, p.x + tmpV.x, p.y + tmpV.y, p.z + tmpV.z, tmpV.x * 2, tmpV.y * 2, tmpV.z * 2, rr(14, 20), rr(9, 12), rr(24, 32), 0.03, 0.029, 0.028, 0.96, { drag: 1.2 });
     }
-    for (let i = 0; i < 6; i++) {
-      const v = tmpV.randomDirection().multiplyScalar(rr(40, 90));
-      this.addGlow(SPARK, p.x, p.y, p.z, v.x, v.y, v.z, rr(0.2, 0.45), 0.25, 0.1, 30, 16, 6, 1, { len: 0.05, drag: 1.5 });
+    // ragged lobes thrown out and stopped by the air
+    for (let i = 0, n = Math.max(1, Math.round(5 * k)); i < n; i++) {
+      tmpV.randomDirection();
+      this.addSmoke(SMOKE.FLAK, p.x + tmpV.x * 3, p.y + tmpV.y * 3, p.z + tmpV.z * 3, tmpV.x * rr(10, 18), tmpV.y * rr(10, 18), tmpV.z * rr(10, 18), rr(10, 15), rr(4, 6), rr(15, 21), 0.042, 0.04, 0.038, 0.85, { drag: 2.4 });
+    }
+    // fragments: dark streaks of smoke and a spray of hot sparks
+    if (d < 2500) {
+      for (let i = 0, n = Math.round(4 * k); i < n; i++) {
+        const v = tmpV.randomDirection().multiplyScalar(rr(30, 45));
+        this.addSmoke(SMOKE.PUFF, p.x, p.y, p.z, v.x, v.y, v.z, rr(1.2, 2), 1.2, 3.5, 0.05, 0.05, 0.05, 0.55, { drag: 1.8 });
+      }
+    }
+    for (let i = 0; i < 10; i++) {
+      const v = tmpV.randomDirection().multiplyScalar(rr(50, 110));
+      this.addGlow(SPARK, p.x, p.y, p.z, v.x, v.y, v.z, rr(0.2, 0.45), 0.3, 0.12, 30, 16, 6, 1, { len: 0.05, drag: 1.5 });
     }
   }
 
-  /** 40mm self-destruct at the end of its tracer life. */
+  // A 40mm self-destructing at the end of its tracer: a sharp little flash and a tight dark puff,
+  // a quarter the size of a 5in burst, that lingers. A burst of fire leaves a string of them.
   airburst(p) {
-    this.addGlow(FLASH, p.x, p.y, p.z, 0, 0, 0, 0.08, 2, 3.5, 30, 18, 8, 1);
-    this.addSmoke(SMOKE.PUFF, p.x, p.y, p.z, rr(-1, 1), rr(-1, 1), rr(-1, 1), rr(3, 5), 1.2, rr(4, 6), 0.16, 0.16, 0.17, 0.7);
+    const d = this._cam.distanceTo(p);
+    if (d > 6000) return;
+    this.addGlow(FLASH, p.x, p.y, p.z, 0, 0, 0, 0.07, 2.2, 4, 40, 26, 11, 1);
+    this.addGlow(FLAME, p.x, p.y, p.z, 0, 0, 0, 0.18, 1, 2.2, 12, 5, 1.4, 1);
+    const n = d < 2500 ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      this.addSmoke(SMOKE.PUFF, p.x + rr(-0.6, 0.6), p.y + rr(-0.6, 0.6), p.z + rr(-0.6, 0.6), rr(-1, 1), rr(-1, 1), rr(-1, 1), rr(7, 10), rr(2, 2.6), rr(5.5, 7), 0.06, 0.058, 0.056, 0.9, { drag: 1.2 });
+    }
   }
 
-  muzzle(p, dir, size = 1, smoke = true) {
+  // A muzzle flash. `own`: the player's own gun, a couple of metres from his eye, gets the flash its
+  // flash hider really let out (about half a metre across on an Oerlikon, a metre on a Bofors) and
+  // a dimmer core, or it would fill a third of the view and bloom over the gun.
+  muzzle(p, dir, size = 1, smoke = true, own = false) {
     const s = size;
-    this.addGlow(FLASH, p.x + dir.x * 0.4 * s, p.y + dir.y * 0.4 * s, p.z + dir.z * 0.4 * s, 0, 0, 0, 0.06, 0.9 * s, 1.4 * s, 60, 34, 12, 1);
+    const k = own ? 0.35 : 1, z = own ? 0.55 : 1;
+    this.addGlow(FLASH, p.x + dir.x * 0.4 * s * z, p.y + dir.y * 0.4 * s * z, p.z + dir.z * 0.4 * s * z, 0, 0, 0, own ? 0.045 : 0.06, 0.9 * s * z, 1.4 * s * z * 0.85, 60 * k, 34 * k, 12 * k, 1);
     // a cone of flame along the bore that doesn't travel
-    this.addGlow(SPARK, p.x, p.y, p.z, dir.x, dir.y, dir.z, 0.05, 0.45 * s, 0.6 * s, 40, 20, 6, 1, { len: 2.2 * s, drag: 1e6 });
+    this.addGlow(SPARK, p.x, p.y, p.z, dir.x, dir.y, dir.z, 0.05, 0.45 * s * z, 0.6 * s * z, 40 * k, 20 * k, 6 * k, 1, { len: 2.2 * s * z, drag: 1e6 });
     if (smoke) {
       // pushed out ahead of the muzzle so it never sits on the camera
       this.addSmoke(SMOKE.CORDITE, p.x + dir.x * 3 * s, p.y + dir.y * 3 * s, p.z + dir.z * 3 * s, dir.x * 14 * s, dir.y * 14 * s, dir.z * 14 * s, rr(1, 2) * s, 0.6 * s, rr(3, 4.5) * s, 0.5, 0.48, 0.45, 0.35, { drag: 2.5, buoy: 0.6 });
@@ -458,8 +501,10 @@ export class FX {
   }
 
   // ---------------------------------------------------------------- update
-  update(dt, camera, { sunDir, sunColor, sunIntensity = 6.5, ambient }) {
+  update(dt, camera, { sunDir, sunColor, sunIntensity = 6.5, ambient, night = 0 }) {
     const cam = this._cam.copy(camera.position);
+    // by night the exposure is wide open: flashes and fires would bloom across half the sky
+    this.glowMat.uniforms.uGlowScale.value = 1 - 0.65 * night;
     const wind = this.wind;
 
     // smoke

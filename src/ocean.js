@@ -82,6 +82,7 @@ uniform vec3 uDeepColor;
 uniform vec3 uShallowColor;
 uniform vec3 uAerColor;
 uniform vec3 uSSSColor;
+uniform float uBiolum;
 varying vec3 vOcWorld;
 varying vec2 vOcBase;
 varying float vOcHeight;
@@ -420,10 +421,11 @@ export class Ocean {
       uShallowColor: { value: new THREE.Color(0.05, 0.36, 0.34) },
       uAerColor: { value: new THREE.Color(0.06, 0.22, 0.24) },
       uSSSColor: { value: new THREE.Color(0.02, 0.2, 0.17) },
+      uBiolum: { value: 0 }, // night: the churned water of wakes and bow waves glows faintly
     };
 
     const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, metalness: 0, ior: 1.333 });
-    mat.defines = { SKIP_WET: '' };
+    mat.defines = { SKIP_WET: '', FLARE_DIFFUSE: '0.2', FLARE_SPECULAR: '0.35' };
     const wglsl = wavesGLSL(this.waves);
     patchMaterial(mat, 'ocean', (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
@@ -495,6 +497,9 @@ export class Ocean {
           float sssView = pow(clamp(dot(ocV, -normalize(ocL + ocN * 0.6)), 0.0, 1.0), 4.0);
           float crestK = smoothstep(-0.15, 0.9, crest);
           vec3 ocSSS = uSSSColor * uSunColorN * (sssView * 1.6 + 0.12) * crestK * sunUp * (1.0 - ocFoamMask) * (1.0 + ocShallow);
+          // phosphorescence in freshly churned water, seen only in the dark
+          // (wakes and bow waves only: the foam map and the hull's churn, not the wind's whitecaps)
+          ocSSS += vec3(0.005, 0.034, 0.03) * uBiolum * clamp(fm.r * 0.6 + ocAer * 0.6, 0.0, 1.0) * (0.5 + 0.5 * fd2) * (1.0 - farK * 0.7);
           float ocRough = sqrt(0.0036 + ocLost * 1.6);
           ocRough = mix(min(ocRough, 0.45), 0.7, ocFoamMask);
           `

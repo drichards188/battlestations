@@ -298,8 +298,8 @@ export class HUD {
   /** After-action report. */
   showEnd(r, { onRestart, onContinue }) {
     const el = $('end');
-    $('end-title').textContent = r.victory ? 'Raid repulsed' : r.title;
-    $('end-sub').textContent = r.victory ? 'The task group holds' : r.sub;
+    $('end-title').textContent = r.title || 'Raid repulsed';
+    $('end-sub').textContent = r.sub || 'The task group holds';
     const types = Object.entries(r.byType).map(([k, v]) => `${v} ${k[0].toUpperCase() + k.slice(1)}${v > 1 ? 's' : ''}`).join(', ') || 'none';
     $('end-stats').innerHTML = `
       <div><span>Score</span><b>${r.score.toLocaleString('en-US')}</b></div>

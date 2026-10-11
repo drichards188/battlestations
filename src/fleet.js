@@ -14,19 +14,47 @@ const _u = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+const _fm = new THREE.Vector3();
+const _fd = new THREE.Vector3();
+const _fo = new THREE.Vector3();
+const _fl = new THREE.Vector3();
+const _fp = new THREE.Vector3();
+const _bMin = new THREE.Vector3();
+const _bMax = new THREE.Vector3();
+
+// Slab test: does the ray o + d t (0 <= t <= tMax) pass through the box [min, max]?
+function rayBox(o, d, min, max, tMax) {
+  let t0 = 0, t1 = tMax;
+  for (const ax of ['x', 'y', 'z']) {
+    const oa = o[ax], da = d[ax];
+    if (Math.abs(da) < 1e-8) {
+      if (oa < min[ax] || oa > max[ax]) return false;
+    } else {
+      let ta = (min[ax] - oa) / da, tb = (max[ax] - oa) / da;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) return false;
+    }
+  }
+  return true;
+}
 
 // AI gun crews at real rates of fire. interval: seconds between rounds for the whole mount
-// (barrels alternate); mag/reload model the 20mm's 60-round drums.
+// (barrels alternate); mag/reload model the 20mm's 60-round drums. Every light gun that bears
+// fires, so the volume is real; `dmg` weights each round's damage (with the difficulty's
+// lethality) so the fleet doesn't kill a raid before it attacks. The 5in are capped at `cap`
+// mounts per aircraft.
 export const GUNS = {
   // 5"/38: ~18 rounds a minute per gun; the Mk 28 twin trains at 25 and elevates at 15 deg/s
-  '5in-twin': { shell: '5in', range: 7000, interval: 1.65, trainRate: 0.436, elevRate: 0.262, err: 0.03, flash: 2.6, smoke: true },
-  '5in-single': { shell: '5in', range: 7000, interval: 3.3, trainRate: 0.45, elevRate: 0.4, err: 0.03, flash: 2.3, smoke: true },
+  '5in-twin': { shell: '5in', range: 7000, interval: 1.65, trainRate: 0.436, elevRate: 0.262, err: 0.03, flash: 2.6, smoke: true, cap: 8, dmg: 1.8 },
+  '5in-single': { shell: '5in', range: 7000, interval: 3.3, trainRate: 0.45, elevRate: 0.4, err: 0.03, flash: 2.3, smoke: true, cap: 8, dmg: 1.8 },
   // Bofors: ~120 rounds a minute per barrel; Mk 1 twin and Mk 2 quad power drives train at
   // 26 and elevate at 24 degrees a second
-  '40mm-quad': { shell: '40mm', range: 2400, interval: 0.125, trainRate: 0.454, elevRate: 0.419, err: 0.024, flash: 1, smoke: false },
-  '40mm-twin': { shell: '40mm', range: 2400, interval: 0.25, trainRate: 0.454, elevRate: 0.419, err: 0.024, flash: 1, smoke: false },
+  '40mm-quad': { shell: '40mm', range: 2400, interval: 0.125, trainRate: 0.454, elevRate: 0.419, err: 0.024, flash: 1, smoke: false, dmg: 0.3 },
+  '40mm-twin': { shell: '40mm', range: 2400, interval: 0.25, trainRate: 0.454, elevRate: 0.419, err: 0.024, flash: 1, smoke: false, dmg: 0.3 },
   // Oerlikon: ~450 rounds a minute, 60-round drum, a few seconds to change it
-  '20mm': { shell: '20mm', range: 1500, interval: 0.133, trainRate: 1.5, elevRate: 1.3, err: 0.026, flash: 0.55, smoke: false, mag: 60, reload: 5 },
+  '20mm': { shell: '20mm', range: 1500, interval: 0.133, trainRate: 1.5, elevRate: 1.3, err: 0.026, flash: 0.55, smoke: false, mag: 60, reload: 5, dmg: 0.12 },
 };
 
 // Hit points and damage by weapon per class.
@@ -165,6 +193,16 @@ export class Ship {
     this.deckHeight = this.model.deckAt(0);
     this.invulnerable = false;
     this.radius = this.halfLength + 25;
+    // the top of the superstructure, for the fouled-range check
+    this.topY = Math.max(this.deckHeight + 4, ...this.model.boxes.map((b) => b.max.y));
+  }
+
+  /** Inside the hull below the deck (ship space)? */
+  inHull(p) {
+    const md = this.model;
+    if (Math.abs(p.z) >= this.halfLength || p.y <= -md.draft) return false;
+    const z = clamp(p.z, -this.halfLength, this.halfLength);
+    return Math.abs(p.x) < md.halfBeamAt(z) && p.y < md.deckAt(z);
   }
 
   worldPoint(local, out) {
@@ -237,6 +275,9 @@ export class Fleet {
     this.ballistics = ballistics;
     this.difficulty = { gunnery: 1, shipDamage: 1, lethality: 0.1 };
     this.events = { damaged: null, sunk: null };
+    this.crewsAway = null;
+    this.night = false; // set by the director
+    this.litAt = null; // (worldPos) => flare light there, wired in main
     this.center = new THREE.Vector3();
     this.guide = { heading: 75 * DEG, base: 75 * DEG, speed: 11, legT: 60, leg: 1 };
     this.hold = false; // freeze shooting (title screen safety)
@@ -422,9 +463,15 @@ export class Fleet {
     wakes.sort((a, b) => Math.hypot(a.x - cp.x, a.z - cp.z) - Math.hypot(b.x - cp.x, b.z - cp.z));
     this.ocean.setShips(wakes);
 
-    // gun crews; no aircraft draws more than a handful of mounts at once
-    for (const p of ctx.air.planes) p.gunners = 0;
-    for (const s of this.ships) for (const m of s.mounts) if (m.target && m.target.alive) m.target.gunners++;
+    // gun crews: count who is on each aircraft (the 5in are capped, the light guns spread out)
+    for (const p of ctx.air.planes) p.gunners = p.heavy = 0;
+    for (const s of this.ships) {
+      for (const m of s.mounts) {
+        if (!m.target?.alive) continue;
+        m.target.gunners++;
+        if (m.def.cap) m.target.heavy++;
+      }
+    }
     for (const s of this.ships) {
       if (s.gone) continue;
       for (const m of s.mounts) {
@@ -562,14 +609,22 @@ export class Fleet {
     const def = m.def;
     const s = m.ship;
     m.retarget -= dt;
+    m.avoidT = Math.max(0, (m.avoidT || 0) - dt);
     const pivot = m.pivotWorld(_v);
     if (m.retarget <= 0) {
       m.retarget = rr(0.4, 0.8);
       let best = null, bestScore = Infinity;
       for (const p of air.planes) {
-        if (!p.alive || (p !== m.target && p.gunners >= 10)) continue;
+        if (!p.alive) continue;
+        // the 5in reach out so far that a few mounts per aircraft is plenty; every light gun that
+        // bears fires, though they prefer an aircraft fewer guns are already on
+        if (def.cap && p !== m.target && p.heavy >= def.cap) continue;
+        if (p === m.avoid && m.avoidT > 0) continue;
         const d = pivot.distanceTo(p.pos);
         if (d > def.range) continue;
+        // darkened ship by night: the automatic weapons hold fire until they can see a target
+        // (close in, lit by flares, or burning); the 5in fire on radar
+        if (this.night && !def.cap && d > 1200 && p.hp > p.maxHp * 0.5 && !(this.litAt?.(p.pos) > 0.6)) continue;
         s.toLocal(p.pos, _w).sub(m.pos);
         const tr = m.fitArc(Math.atan2(-_w.x, -_w.z));
         if (tr === null) continue;
@@ -577,13 +632,17 @@ export class Fleet {
         if (el < m.elevLimits[0] || el > m.elevLimits[1]) continue;
         const threat = p.target === s && (p.phase === 'dive' || p.phase === 'run' || p.phase === 'terminal' || p.phase === 'strafe');
         let score = d * (threat ? 0.45 : 1) * (p === m.target ? 0.75 : 1) * (p.state === 'egress' ? 2.5 : 1);
+        if (!def.cap) score *= 1 + 0.05 * (p.gunners - (p === m.target ? 1 : 0));
         if (p.role === 'kamikaze' && p.phase === 'terminal') score *= 0.6;
         if (score < bestScore) {
           bestScore = score;
           best = p;
         }
       }
-      if (best && best !== m.target) best.gunners++;
+      if (best && best !== m.target) {
+        best.gunners++;
+        if (def.cap) best.heavy++;
+      }
       m.target = best;
     }
     const p = m.target;
@@ -606,6 +665,19 @@ export class Fleet {
     if (!m.target || this.hold) return;
     if (Math.abs(dT) > 0.04 || Math.abs(dE) > 0.04 || m.cool > 0) return;
     if (pivot.distanceTo(p.pos) > m.fireRange) return;
+    if (this.fouled(m, p)) {
+      // check fire; if the line stays fouled, the crew shifts to another target
+      m.cool = Math.max(m.cool, 0.15);
+      m.blockedT = (m.blockedT || 0) + 0.15;
+      if (m.blockedT > 0.6) {
+        m.avoid = p;
+        m.avoidT = 2.5;
+        m.retarget = 0;
+        m.blockedT = 0;
+      }
+      return;
+    }
+    m.blockedT = 0;
     m.cool += def.interval * rr(0.92, 1.08);
     if (m.cool < -def.interval) m.cool = 0;
     if (def.mag) {
@@ -616,6 +688,34 @@ export class Fleet {
       }
     }
     this.shoot(m, tof, ctx);
+  }
+
+  // Firing cutouts and a fouled range: hold fire rather than shoot through our own ship (the cams
+  // on the real mounts cut the firing circuit) or a friendly one (the mount captain's call).
+  fouled(m, target) {
+    const s = m.ship;
+    const mz = m.muzzleWorld(m.barrel, _fm);
+    const dir = m.boreWorld(_fd);
+    // our own superstructure, and the hull and deck close aboard
+    s.toLocal(mz, _fo);
+    _fl.copy(dir).transformDirection(s.inverse);
+    if (s.rayBlocked(_fo, _fl, 300, 1.5)) return true;
+    for (const t of [4, 9, 16, 26, 40]) if (s.inHull(_fp.copy(_fo).addScaledVector(_fl, t))) return true;
+    // a friendly ship between the gun and the target, hull and superstructure as one box
+    const range = mz.distanceTo(target.pos);
+    for (const o of this.ships) {
+      if (o === s || o.gone || o.sunk) continue;
+      _fp.subVectors(o.position, mz);
+      const along = _fp.dot(dir);
+      if (along < -o.radius || along > range + o.radius) continue;
+      if (_fp.addScaledVector(dir, -along).lengthSq() > o.radius * o.radius) continue;
+      o.toLocal(mz, _fo);
+      _fl.copy(dir).transformDirection(o.inverse);
+      _bMin.set(-o.halfBeam - 2, -2, -o.halfLength - 2);
+      _bMax.set(o.halfBeam + 2, o.topY + 2, o.halfLength + 2);
+      if (rayBox(_fo, _fl, _bMin, _bMax, range)) return true;
+    }
+    return false;
   }
 
   shoot(m, tof, ctx) {
@@ -632,11 +732,14 @@ export class Fleet {
     dir.y += ey;
     dir.normalize();
     const fuze = def.shell === '5in' ? tof * rr(0.9, 1.12) + rr(-0.2, 0.3) : 0;
-    this.ballistics.fire(def.shell, muzzle, dir, m.ship.velocity, OWNER.FLEET, { fuze, dmg: this.difficulty.lethality * (def.shell === '5in' ? 1.8 : 1) });
+    // the 20mm drums were loaded with a tracer in every fifth round (each mount starts somewhere in it)
+    const every = SHELLS[def.shell].tracerEvery;
+    const tracer = !every || (m.loaded = (m.loaded ?? Math.floor(Math.random() * every)) + 1) % every === 0;
+    this.ballistics.fire(def.shell, muzzle, dir, m.ship.velocity, OWNER.FLEET, { fuze, dmg: this.difficulty.lethality * (def.dmg ?? 1), tracer });
     const cam = ctx.camera.position;
     const dist = muzzle.distanceTo(cam);
     if (dist < 3500) this.fx.muzzle(muzzle, dir, def.flash * (dist < 600 ? 1 : 1.6), def.smoke || dist < 400);
-    this.audio.gun(def.shell, muzzle);
+    this.audio.gun(def.shell, muzzle, { src: m });
   }
 
   /** Gun crews: instanced sailors at every mount (call once all mounts exist, stations included). */
@@ -673,7 +776,8 @@ export class Fleet {
         const c = list[i];
         const s = c.m.ship;
         const far = (s.position.x - cp.x) ** 2 + (s.position.z - cp.z) ** 2 > 1400 * 1400;
-        if (s.gone || s.sinkT > 20 || c.m.manual || far) mesh.setMatrixAt(i, zero);
+        // (crewsAway: a ship whose crews are still on their way to their stations)
+        if (s.gone || s.sinkT > 20 || c.m.manual || far || s === this.crewsAway) mesh.setMatrixAt(i, zero);
         else mesh.setMatrixAt(i, _m.multiplyMatrices(c.rotates ? c.m.baseMatrix : c.m.deckMatrix, c.local));
       }
       mesh.instanceMatrix.needsUpdate = true;

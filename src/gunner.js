@@ -361,7 +361,16 @@ export class Gunner {
       this.fire(dt, st);
     }
 
-    // pose every detailed gun from its mount
+    this.poseModels();
+
+    if (this.active) {
+      this.placeCamera(rawDt);
+      this.designate(air);
+    }
+  }
+
+  // pose every detailed gun from its mount
+  poseModels() {
     for (const M of Object.values(this.models)) {
       const s = M?.owner;
       if (!s) continue;
@@ -370,11 +379,14 @@ export class Gunner {
       s.gun.barrels.forEach((b, i) => (b.position.z = s.barrelZ[i] + s.recoil[i] * s.gun.recoil));
       s.gun.root.updateMatrixWorld(true);
     }
+  }
 
-    if (this.active) {
-      this.placeCamera(rawDt);
-      this.designate(air);
-    }
+  /** The camera on the selected gun's sight before the player has taken it over (the GQ run's last steps). */
+  sightPreview() {
+    const st = this.station;
+    if (st.model.owner !== st) this.occupy(st);
+    this.poseModels();
+    this.placeCamera(0);
   }
 
   // The electro-hydraulic power drives under local control. The pointer's and trainer's
@@ -500,10 +512,12 @@ export class Gunner {
     dir.y += rr(-1, 1) * def.spread;
     dir.z += rr(-1, 1) * def.spread;
     dir.normalize();
-    this.ballistics.fire(def.shell, mz, dir, this.ship.velocity, OWNER.PLAYER);
+    // a tracer in every fifth round of a 20mm drum; every 40mm round is a tracer
+    const every = SHELLS[def.shell].tracerEvery;
+    this.ballistics.fire(def.shell, mz, dir, this.ship.velocity, OWNER.PLAYER, { tracer: !every || st.shot % every === 1 });
     st.recoil[bi] = 1;
     // cordite smoke from every few rounds only: puffs this close to the eye are full-screen overdraw
-    this.fx.muzzle(mz, dir, def.flash, def.smoke || st.shot % 4 === 0);
+    this.fx.muzzle(mz, dir, def.flash, def.smoke || st.shot % 4 === 0, true);
     if (def.deafen) this.deafen = Math.min(1, this.deafen + def.deafen);
     this.audio.gun(def.shell, null, { player: true, barrel: bi });
     this.audio.casing();

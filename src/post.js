@@ -389,11 +389,12 @@ const GradeShader = {
     uSharpen: { value: 0.35 },
     uResolution: { value: new THREE.Vector2(1, 1) },
     uFade: { value: 0 },
+    uNight: { value: 0 },
   },
   vertexShader: fsVertex,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uTime, uVignette, uGrain, uSaturation, uContrast, uSharpen, uFade;
+    uniform float uTime, uVignette, uGrain, uSaturation, uContrast, uSharpen, uFade, uNight;
     uniform vec3 uShadowTint, uHighlightTint;
     uniform vec2 uResolution;
     varying vec2 vUv;
@@ -415,6 +416,10 @@ const GradeShader = {
       c = mix(vec3(l), c, uSaturation);
       c = (c - 0.5) * uContrast + 0.5;
       c *= mix(uShadowTint, uHighlightTint, smoothstep(0.1, 0.8, l));
+      // night: the eye's rods see dim light without colour and a little blue (the Purkinje
+      // shift); flares, fires and tracers are bright enough to keep theirs
+      float scot = uNight * (1.0 - smoothstep(0.04, 0.45, l));
+      c = mix(c, vec3(l) * vec3(0.78, 0.9, 1.14), scot * 0.8);
       vec2 v = vUv - 0.5;
       c *= 1.0 - uVignette * smoothstep(0.25, 0.9, dot(v, v) * 2.2);
       float g = fract(sin(dot(vUv * 1000.0 + uTime * 17.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;

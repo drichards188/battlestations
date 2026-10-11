@@ -11,6 +11,7 @@ export const PLANES = {
 };
 
 const MAX_PER_TYPE = 48;
+const MAX_EXHAUST = 512;
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -46,8 +47,64 @@ export class Air {
     this.models = {};
     this.meshes = {};
     this.difficulty = { accuracy: 1, hp: 1 };
-    this.events = { kill: null, escape: null, crash: null, release: null };
+    this.events = { kill: null, escape: null, crash: null, release: null, flare: null };
     this.stats = { killsPlayer: 0, killsFleet: 0 };
+
+    // Exhaust flames: in the dark a radial's short stacks show a flicker of flame (aircraft on
+    // an attack ran without navigation lights). Drawn only at night; never smaller than a couple
+    // of pixels, so a gunner can pick up an aircraft by its exhaust.
+    const eq = new THREE.PlaneGeometry(1, 1);
+    const eg = new THREE.InstancedBufferGeometry();
+    eg.index = eq.index;
+    eg.setAttribute('position', eq.attributes.position);
+    this.exA = new THREE.InstancedBufferAttribute(new Float32Array(MAX_EXHAUST * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    this.exB = new THREE.InstancedBufferAttribute(new Float32Array(MAX_EXHAUST * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    eg.setAttribute('iA', this.exA);
+    eg.setAttribute('iB', this.exB);
+    eg.instanceCount = 0;
+    this.exhaustMat = new THREE.ShaderMaterial({
+      uniforms: { uNight: { value: 0 }, uPixel: { value: 0.0016 } },
+      vertexShader: /* glsl */ `
+        attribute vec4 iA; // stack position, flicker
+        attribute vec4 iB; // aircraft forward, flame size
+        uniform float uNight;
+        uniform float uPixel;
+        varying vec3 vCol;
+        varying vec2 vQ;
+        void main() {
+          vQ = position.xy * 2.0;
+          vec3 toCam = cameraPosition - iA.xyz;
+          float dist = length(toCam);
+          // the stacks sit on the cowling's sides and blow aft: from dead ahead they are hidden
+          float ahead = dot(toCam / max(dist, 1e-3), iB.xyz);
+          float vis = 1.0 - 0.8 * smoothstep(0.35, 0.95, ahead);
+          float s = max(iB.w, dist * uPixel * 2.2);
+          float energy = max(iB.w * iB.w / (s * s), 0.2);
+          vec4 mv = viewMatrix * vec4(iA.xyz, 1.0);
+          mv.xy += position.xy * s;
+          gl_Position = projectionMatrix * mv;
+          vCol = vec3(1.0, 0.5, 0.2) * 3.0 * iA.w * vis * uNight * energy * exp(-dist * 0.0002);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vCol;
+        varying vec2 vQ;
+        void main() {
+          float r = length(vQ);
+          float a = exp(-r * r * 5.0) * (1.0 - smoothstep(0.7, 1.0, r));
+          gl_FragColor = vec4(vCol * a * mix(vec3(1.0), vec3(0.8, 0.95, 1.6), exp(-r * r * 30.0)), 1.0);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.exhaust = new THREE.Mesh(eg, this.exhaustMat);
+    this.exhaust.frustumCulled = false;
+    this.exhaust.renderOrder = 6;
+    this.exhaust.visible = false;
+    scene.add(this.exhaust);
+    this.night = 0;
 
     const discMat = createPropDiscMaterial();
     for (const type of Object.keys(PLANES)) {
@@ -93,18 +150,27 @@ export class Air {
     this.groups.length = 0;
   }
 
+  /** Night factor 0..1 (exhaust flames show), and the size of a pixel in radians at unit distance. */
+  setNight(k, pixel) {
+    this.night = k;
+    this.exhaustMat.uniforms.uNight.value = k;
+    this.exhaustMat.uniforms.uPixel.value = pixel;
+  }
+
   /**
    * Spawn a raid group.
-   * opts: { type, count, role ('dive'|'torpedo'|'strafe'|'kamikaze'|'escort'), bearing (deg, compass from
-   *         the fleet centre), distance, altitude, center: Vector3, pickTarget: () => ship }
+   * opts: { type, count, role ('dive'|'torpedo'|'strafe'|'kamikaze'|'flare'), bearing (deg, compass from
+   *         the fleet centre), distance, altitude, center: Vector3, pickTarget: () => ship,
+   *         drop ('para' parachute flares | 'float' float lights, for 'flare'), attackBearing (the
+   *         raid's main axis, for laying the flares) }
    */
-  spawnGroup({ type, count, role, bearing, distance = 7500, altitude = 1500, center, pickTarget, delay = 0 }) {
+  spawnGroup({ type, count, role, bearing, distance = 7500, altitude = 1500, center, pickTarget, delay = 0, drop = 'para', attackBearing = bearing }) {
     const def = PLANES[type];
     const b = THREE.MathUtils.degToRad(bearing);
     const origin = new THREE.Vector3(center.x + Math.sin(b) * distance, altitude, center.z - Math.cos(b) * distance);
     const fwd = new THREE.Vector3(center.x - origin.x, 0, center.z - origin.z).normalize();
     const right = new THREE.Vector3().crossVectors(fwd, UP).normalize();
-    const group = { id: nextId++, type, role, planes: [], center: center.clone(), broken: false, bearing, delay };
+    const group = { id: nextId++, type, role, planes: [], center: center.clone(), broken: false, bearing, delay, drop, attackBearing };
     for (let i = 0; i < count; i++) {
       const sl = SLOTS[i % SLOTS.length];
       const extra = Math.floor(i / SLOTS.length) * 260;
@@ -305,7 +371,7 @@ export class Air {
     if (p.state === 'form') {
       const L = g.leader;
       const dist = Math.hypot(p.pos.x - center.x, p.pos.z - center.z);
-      const breakAt = p.role === 'torpedo' ? 6200 : p.role === 'kamikaze' ? 4800 : p.role === 'dive' ? 3600 : 4200;
+      const breakAt = p.role === 'torpedo' ? 6200 : p.role === 'kamikaze' ? 4800 : p.role === 'dive' ? 3600 : p.role === 'flare' ? 6800 : 4200;
       if (g.broken || dist < breakAt) {
         g.broken = true;
         p.state = 'attack';
@@ -339,6 +405,8 @@ export class Air {
         return this.torpedoBomber(p, dt, fleet);
       case 'kamikaze':
         return this.kamikaze(p, dt, fleet);
+      case 'flare':
+        return this.flarePlane(p, dt, fleet);
       default:
         return this.fighter(p, dt, t, fleet, ballistics);
     }
@@ -501,6 +569,67 @@ export class Air {
     this.checkShipCrash(p, fleet);
   }
 
+  // Flare plane: at night a snooper lays float lights along the force's wake to mark its track,
+  // and flare planes hang a line of parachute flares across the far side of the force from the
+  // torpedo planes, so the ships stand out against the light. Then they turn away.
+  flarePlane(p, dt, fleet) {
+    const def = p.def;
+    const g = p.group;
+    if (!p.line) {
+      const c = fleet.center;
+      const float = g.drop === 'float';
+      const n = float ? 5 : 4;
+      const spacing = float ? 550 : 600; // float flares "at intervals of about 600 yards"
+      // each aircraft of the group lays its own line, a few hundred metres from the next
+      const k = g.planes.indexOf(p) - (g.planes.length - 1) / 2;
+      let cx, cz, dx, dz;
+      if (float) {
+        const h = fleet.own.heading;
+        dx = Math.sin(h);
+        dz = -Math.cos(h);
+        cx = c.x - dx * 2400 - dz * k * 450;
+        cz = c.z - dz * 2400 + dx * k * 450;
+      } else {
+        const b = THREE.MathUtils.degToRad(g.attackBearing);
+        const ux = -Math.sin(b), uz = Math.cos(b); // from the attackers through the force
+        dx = -uz;
+        dz = ux;
+        cx = c.x + ux * (1500 + k * 700) + dx * k * 300;
+        cz = c.z + uz * (1500 + k * 700) + dz * k * 300;
+      }
+      const half = ((n - 1) * spacing) / 2;
+      let ax = cx - dx * half, az = cz - dz * half;
+      // start from whichever end is nearer
+      if (!float && Math.hypot(p.pos.x - (cx + dx * half), p.pos.z - (cz + dz * half)) < Math.hypot(p.pos.x - ax, p.pos.z - az)) {
+        ax = cx + dx * half;
+        az = cz + dz * half;
+        dx = -dx;
+        dz = -dz;
+      }
+      p.line = { ax, az, dx, dz, n, spacing, dropped: 0 };
+      p.phase = 'approach';
+    }
+    const L = p.line;
+    if (p.phase === 'approach') {
+      const lx = L.ax - L.dx * 1300, lz = L.az - L.dz * 1300;
+      this.steer(p, this.levelToward(p, lx, lz, p.altitude), dt, def.turn * 0.9, def.fast);
+      if (Math.hypot(p.pos.x - lx, p.pos.z - lz) < 500) p.phase = 'drop';
+    } else if (p.phase === 'drop') {
+      const ex = L.ax + L.dx * ((L.n - 1) * L.spacing + 800), ez = L.az + L.dz * ((L.n - 1) * L.spacing + 800);
+      this.steer(p, this.levelToward(p, ex, ez, p.altitude), dt, def.turn * 0.9, def.cruise);
+      const along = (p.pos.x - L.ax) * L.dx + (p.pos.z - L.az) * L.dz;
+      if (L.dropped < L.n && along >= L.dropped * L.spacing) {
+        L.dropped++;
+        this.events.flare?.(this.hardpoint(p), p.vel, g.drop);
+      }
+      if (L.dropped >= L.n || along > (L.n - 1) * L.spacing + 900) {
+        p.phase = 'egress';
+        p.state = 'egress';
+        p.t = 0;
+      }
+    } else this.egress(p, dt, fleet);
+  }
+
   // Fighters escort, then strafe the ships: shallow diving runs with all guns, pull up over the
   // deck, extend and come back.
   fighter(p, dt, t, fleet, ballistics) {
@@ -646,5 +775,36 @@ export class Air {
         disc.instanceMatrix.needsUpdate = true;
       }
     }
+
+    // exhaust flames (night only): a pair of stacks per engine, either side of the cowling
+    this.exhaust.visible = this.night > 0.01;
+    if (!this.exhaust.visible) return;
+    const A = this.exA.array, B = this.exB.array;
+    let k = 0;
+    for (const p of this.planes) {
+      if (p.gone || !p.alive) continue;
+      for (const e of p.model.engines) {
+        for (const side of [-1, 1]) {
+          if (k >= MAX_EXHAUST) break;
+          _v.set(e.x + side * 0.78, e.y - 0.08, e.z + 0.3).applyQuaternion(p.quat).add(p.pos);
+          const o = k * 4;
+          A[o] = _v.x;
+          A[o + 1] = _v.y;
+          A[o + 2] = _v.z;
+          A[o + 3] = 0.65 + 0.35 * Math.random();
+          B[o] = p.fwd.x;
+          B[o + 1] = p.fwd.y;
+          B[o + 2] = p.fwd.z;
+          B[o + 3] = 0.3;
+          k++;
+        }
+      }
+    }
+    for (const a of [this.exA, this.exB]) {
+      a.clearUpdateRanges();
+      a.addUpdateRange(0, k * 4);
+      a.needsUpdate = true;
+    }
+    this.exhaust.geometry.instanceCount = k;
   }
 }
