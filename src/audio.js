@@ -42,7 +42,7 @@ const RECORDINGS = {
   pole: { file: 'metal-pole-drop-188206.mp3', slices: [[13.02, 0.8], [15.4, 0.8], [17.68, 0.8], [28.07, 0.9], [29.18, 0.9], [31.68, 0.9], [33.11, 0.8]] }, // (CC0)
   // the general alarm and the 1MC call, US Navy (public domain): the gong to 3.6 s, the call from
   // 4.2 to 10.7 s, the gong again to the end (14.4 s)
-  gq: { file: 'general-quarters-usn.ogg', voice: [4.2, 6.5] },
+  gq: { file: 'general-quarters-usn.ogg' },
   sea: { file: 'bow-wave-360631.mp3' }, // a bow wave, close (CC0)
 };
 
@@ -2032,21 +2032,9 @@ export class AudioEngine {
     this.interior = on;
   }
 
-  /** The real general alarm and 1MC call arrived: keep it, and a cut of just the call. */
+  /** The real general alarm and 1MC call arrived: keep it (it sounds once, at the alarm). */
   setGqCall(buf) {
     this.gqCall = buf;
-    const [t0, len] = RECORDINGS.gq.voice;
-    const SR = buf.sampleRate, a = Math.floor(t0 * SR), n = Math.min(Math.floor(len * SR), buf.length - a);
-    if (n > SR) {
-      const out = this.ctx.createBuffer(buf.numberOfChannels, n, SR);
-      const fade = Math.floor(0.05 * SR);
-      for (let c = 0; c < buf.numberOfChannels; c++) {
-        const src = buf.getChannelData(c).subarray(a, a + n);
-        const d = out.getChannelData(c);
-        for (let i = 0; i < n; i++) d[i] = src[i] * Math.min(1, i / fade, (n - 1 - i) / fade);
-      }
-      this.gqVoice = out;
-    }
     // the alarm was called while it was still loading: sound it now
     if (this.alarmWanted != null) this.play1MC(buf);
     this.alarmWanted = null;
@@ -2071,12 +2059,6 @@ export class AudioEngine {
       this.alarmWanted = null;
       this.alarmGong();
     }, 1500);
-  }
-
-  /** The bosun's mate repeats the call (the alarm's gong doesn't sound again). */
-  gqRepeat() {
-    if (!this.ctx || !this.gqVoice) return;
-    this.play1MC(this.gqVoice);
   }
 
   // without the recording: the alarm's gong, synthesized

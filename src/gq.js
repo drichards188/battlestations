@@ -33,8 +33,6 @@ const CALLS = [
   [7, 'Up and forward to starboard! Make a hole!', 'warn'],
   [22.5, 'Set condition Zebra throughout the ship.', 'info'],
 ];
-// the bosun's mate repeats the call while the crew are still on their way
-const REPEAT_AT = 15.5;
 
 export class GeneralQuarters {
   constructor({ ship, camera, audio, hud }) {
@@ -129,7 +127,6 @@ export class GeneralQuarters {
     this.s = 0;
     this.phase = 0;
     this.calls = 0;
-    this.repeated = false;
     this.blend = -1;
     this.look.yaw = this.look.pitch = 0;
     this.inside = true;
@@ -197,10 +194,6 @@ export class GeneralQuarters {
     while (this.calls < CALLS.length && this.t >= CALLS[this.calls][0]) {
       const [, text, kind] = CALLS[this.calls++];
       this.hud.radio(text, kind);
-    }
-    if (!this.repeated && this.t >= REPEAT_AT) {
-      this.repeated = true;
-      this.audio.gqRepeat?.();
     }
     // the player follows a beat behind the alarm, at the pace of the stretch he is on
     if (this.t > 1.6 && this.blend < 0) {
