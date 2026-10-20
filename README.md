@@ -66,4 +66,4 @@ Not done yet:
 
 - [three.js](https://threejs.org) and [lil-gui](https://lil-gui.georgealways.com) (MIT); [Vite](https://vite.dev) (MIT) for development.
 - Ten real recordings, listed in [public/audio/CREDITS.md](public/audio/CREDITS.md): eight CC0 from Freesound, the US Navy's general alarm (public domain), and "Tykki, laukaus / Big gun, cannon, 76 mm, single shots, gunshots" by YleArkisto ([source](https://freesound.org/s/332935/), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
-- The project has no license file.
+- License: © 2026 David Richards. Battle Stations is source-available under [PolyForm Strict 1.0.0](LICENSE): you may play and study it for non-commercial purposes, but not copy, change or publish your own version of it, or use it commercially. Contributions are welcome here; see [Contributing](CONTRIBUTING.md). The libraries and recordings above keep their own licenses.
