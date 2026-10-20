@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MaxGFX: Battle Stations, a three.js (WebGL2) game/graphics showcase: the player crews the AA guns of a US battleship in a 1944 Pacific carrier task group against Japanese air raids. Plain ES modules, no TypeScript, no framework. Everything (ocean, ships, aircraft, guns, textures, music, most audio) is generated procedurally at load. The only asset files are a few real sound recordings in `public/audio/` (Freesound CC0/CC BY and US Navy public domain; sources and licenses in `public/audio/CREDITS.md`), which `audio.js` cuts into slices at load and lays over or in place of the synthesized banks (`RECORDINGS`); without them the synthesized sounds play. The only runtime dependencies used are three.js and lil-gui. See README.md for controls, the rendering feature list, and a per-file layout of `src/`.
+MaxGFX: Battle Stations, a three.js (WebGL2) game/graphics showcase: the player crews the AA guns of a US battleship in a 1944 Pacific carrier task group against Japanese air raids. Plain ES modules, no TypeScript, no framework. Everything (ocean, ships, aircraft, guns, textures, music, most audio) is generated procedurally at load. The only asset files are a few real sound recordings in `public/audio/` (Freesound CC0/CC BY and US Navy public domain; sources and licenses in `public/audio/CREDITS.md`), which `audio.js` cuts into slices at load and lays over or in place of the synthesized banks (`RECORDINGS`); without them the synthesized sounds play. The only runtime dependencies used are three.js and lil-gui. See README.md and `docs/`: `docs/PLAYING.md` for the controls, `docs/MODELLED.md` for the rendering feature list, and `docs/DEVELOPMENT.md` for a per-file layout of `src/`.
 
 ## Commands
 
@@ -73,3 +73,18 @@ The battle opens with General Quarters (`src/gq.js`, `params.gqOpening`): the pl
 ### Lighting, sky and post
 
 `Atmosphere` owns the sky, the sun/moon light and IBL baked from the live sky; re-baking is throttled to real changes (sun moved more than 0.4°, storm level). The sky shader adds a twilight afterglow and dome (three's `Sky` goes black 2° below the horizon), stars, the moon's disc lit by the sun's direction (so its phase is geometric) and a dim moonlit sky. By night main raises the auto exposure ceiling, lowers its key, and `post.grade.uniforms.uNight` desaturates the darks toward blue (the Purkinje shift). The shadow frustum follows a focus point ahead of the camera; `renderer.shadowMap.autoUpdate` is off and the loop sets `needsUpdate`. `PostFX` (`src/post.js`) renders the scene once into an HDR target with a shared depth texture; pass order: scene, GTAO, auto exposure, DoF (cinematic/photo only), bloom, lens, OutputPass, SMAA, grade. `fx.js` keeps a fixed pool of point lights; never add or remove lights at runtime, since a change in light count recompiles every lit shader.
+
+## README structure
+
+The README is a one-screen front page in the Smart Brevity style, shared with the sibling games (Battle Stations in `../threejs-maxgfx`, Echelon in `../threejs-iads`, Drumfire in `../threejs-drumfire`). Keep it under about 450 words of prose, with these headings in this order; the detail lives in `docs/`. Update the README and the docs when a change makes them inaccurate.
+
+1. `# Name: subtitle`, the screenshot (`docs/screenshot.jpg`), a bold one-sentence lede, then `**Why it's different:**` in one or two sentences
+2. `## What you do`: three to six bullets
+3. `## Play it`: the commands, the port, the browser, one line on sharing the build
+4. `## Controls`: the essential keys only, linking to the full list
+5. `## Status`: one line on what is playable, then at most five "not done yet" bullets
+6. `## Go deeper`: links to `docs/PLAYING.md` (modes, units, every key, tutorials), `docs/MODELLED.md` (rendering, simulation, sound), `docs/HISTORY.md` (what is real, what is game, sources) and `docs/DEVELOPMENT.md` (dev pages, tests, tools, the source layout)
+7. `## More games`: one bullet per sibling game, linking its GitHub repository with a one-line description; never say where the code came from
+8. `## Credits`: libraries, recordings and data, with any attribution their licenses require
+
+In `docs/`, keep paragraphs short (under about 100 words) and use bullets and bold lead-ins so a reader can skim.
