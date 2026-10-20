@@ -65,5 +65,3 @@ src/
     interior.js    the GQ route through the ship: berthing, passageways, doors, hatches, ladders
     runners.js     the running crew: instanced, articulated sailors that run, climb and duck
 ```
-
-**Leftovers.** `src/` also still holds sixteen modules from Valley of Wisps, the game this one grew out of (terrain, creatures, vegetation, physics and others). Nothing imports them and they are not in the build. They are the only users of the `@dimforge/rapier3d-compat`, `miniplex` and `yuka` packages in `package.json`.
