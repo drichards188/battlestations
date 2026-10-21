@@ -12,7 +12,7 @@ npm run preview  # serve the built bundle
 ```
 
 - **Browser.** WebGL2 is required.
-- **Sharing.** The build uses relative paths, so `dist/` runs from any folder on a web server: upload it to itch.io as an HTML game, put it on GitHub Pages, or try it locally with `npm run preview`.
+- **Sharing.** The build uses relative paths, so `dist/` runs from any folder on a web server: upload it to itch.io as an HTML game, put it on GitHub Pages, or try it locally with `npm run preview`. Keep `licenses.md` (the bundled libraries' licenses) and `audio/CREDITS.md` (the recordings) with it.
 - **Not from disk.** Opening `dist/index.html` straight from disk won't work, because browsers block modules and audio loaded from `file://`.
 
 ## Testing
