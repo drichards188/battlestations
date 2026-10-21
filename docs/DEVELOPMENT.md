@@ -18,9 +18,9 @@ npm run preview  # serve the built bundle
 ## Testing
 
 - **No test suite.** There are no tests, linter or formatter. Changes are checked on the dev server: `F3` shows frame statistics, and `Esc` opens the settings panel.
-- **Headless.** `window.__maxgfx` exposes every system plus `frame(dt, draw)`. Stop the loop with `__maxgfx.renderer.setAnimationLoop(null)`, then call `frame(0.05, false)` repeatedly to fast-forward a battle without drawing (about 2 ms a step).
-- **Capturing a frame.** Call `__maxgfx.post.render()` and `renderer.domElement.toDataURL()` in the same evaluation.
-- **Starting a battle.** `document.getElementById('play').click()` starts one, and `__maxgfx.gq.skip()` skips the General Quarters run.
+- **Headless.** `window.__battlestations` exposes every system plus `frame(dt, draw)`. Stop the loop with `__battlestations.renderer.setAnimationLoop(null)`, then call `frame(0.05, false)` repeatedly to fast-forward a battle without drawing (about 2 ms a step).
+- **Capturing a frame.** Call `__battlestations.post.render()` and `renderer.domElement.toDataURL()` in the same evaluation.
+- **Starting a battle.** `document.getElementById('play').click()` starts one, and `__battlestations.gq.skip()` skips the General Quarters run.
 - **Balance.** After changing guns, shells, VT fuzes or aircraft hit points, fast-forward a few battles and check the fleet doesn't kill most of a raid before it attacks.
 
 ## Known polish items

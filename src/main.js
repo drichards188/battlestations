@@ -630,7 +630,7 @@ async function init() {
       if (!blob) return;
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `maxgfx-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+      a.download = `battle-stations-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     }, 'image/png');
@@ -902,7 +902,7 @@ async function init() {
   };
   renderer.setAnimationLoop(() => frame());
 
-  window.__maxgfx = { renderer, scene, camera, params, atmosphere, ocean, islands, clouds, fx, ballistics, ordnance, fleet, air, gunner, director, cinematic, weather, audio, hud, post, flares, gq, get mode() { return mode; }, setMode, frame };
+  window.__battlestations = { renderer, scene, camera, params, atmosphere, ocean, islands, clouds, fx, ballistics, ordnance, fleet, air, gunner, director, cinematic, weather, audio, hud, post, flares, gq, get mode() { return mode; }, setMode, frame };
 }
 
 init().catch((err) => {

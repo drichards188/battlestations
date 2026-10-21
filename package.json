@@ -1,7 +1,7 @@
 {
-  "name": "threejs-maxgfx",
+  "name": "battle-stations",
   "version": "1.0.0",
-  "description": "Game-quality real-time graphics showcase built on three.js",
+  "description": "Battle Stations: crew the anti-aircraft guns of a battleship in the Pacific, 1944, in three.js",
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",

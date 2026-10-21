@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MaxGFX: Battle Stations, a three.js (WebGL2) game/graphics showcase: the player crews the AA guns of a US battleship in a 1944 Pacific carrier task group against Japanese air raids. Plain ES modules, no TypeScript, no framework. Everything (ocean, ships, aircraft, guns, textures, music, most audio) is generated procedurally at load. The only asset files are a few real sound recordings in `public/audio/` (Freesound CC0/CC BY and US Navy public domain; sources and licenses in `public/audio/CREDITS.md`), which `audio.js` cuts into slices at load and lays over or in place of the synthesized banks (`RECORDINGS`); without them the synthesized sounds play. The runtime dependencies are three.js and lil-gui. See README.md and `docs/`: `docs/PLAYING.md` for the controls, `docs/MODELLED.md` for the rendering feature list, and `docs/DEVELOPMENT.md` for a per-file layout of `src/`.
+Battle Stations, a three.js (WebGL2) game: the player crews the AA guns of a US battleship in a 1944 Pacific carrier task group against Japanese air raids. Plain ES modules, no TypeScript, no framework. Everything (ocean, ships, aircraft, guns, textures, music, most audio) is generated procedurally at load. The only asset files are a few real sound recordings in `public/audio/` (Freesound CC0/CC BY and US Navy public domain; sources and licenses in `public/audio/CREDITS.md`), which `audio.js` cuts into slices at load and lays over or in place of the synthesized banks (`RECORDINGS`); without them the synthesized sounds play. The runtime dependencies are three.js and lil-gui. See README.md and `docs/`: `docs/PLAYING.md` for the controls, `docs/MODELLED.md` for the rendering feature list, and `docs/DEVELOPMENT.md` for a per-file layout of `src/`.
 
 ## Commands
 
@@ -17,7 +17,7 @@ npm run preview  # serve dist/
 
 There are no tests, linter, or formatter configured. Verify changes by running the dev server and looking at the result in a browser (F3 shows FPS, draw calls, triangles, aircraft, shells and particles; lil-gui settings panel appears when the mouse is released with Esc).
 
-Headless testing: `window.__maxgfx` exposes every system plus `frame(dt, draw)`. Stop the loop with `renderer.setAnimationLoop(null)` and call `frame(0.05, false)` repeatedly to fast-forward the battle without rendering (about 2 ms per step), then `post.render()` and `renderer.domElement.toDataURL()` in the same evaluate to capture a frame.
+Headless testing: `window.__battlestations` exposes every system plus `frame(dt, draw)`. Stop the loop with `renderer.setAnimationLoop(null)` and call `frame(0.05, false)` repeatedly to fast-forward the battle without rendering (about 2 ms per step), then `post.render()` and `renderer.domElement.toDataURL()` in the same evaluate to capture a frame.
 
 ## Architecture
 
