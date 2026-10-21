@@ -1,4 +1,4 @@
-# Battle Stations: anti-aircraft guns in the Pacific, 1944
+# Battle Stations: USS Alabama in the Pacific, 1944
 
 ![Battle Stations](docs/screenshot.jpg)
 
